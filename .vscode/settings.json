@@ -1,0 +1,27 @@
+{
+    "files.associations": {
+        "*.js": "javascript",
+        "*.html": "html",
+        "*.css": "css"
+    },
+    "emmet.includeLanguages": {
+        "javascript": "html"
+    },
+    "liveServer.settings.port": 8000,
+    "liveServer.settings.root": "/",
+    "liveServer.settings.CustomBrowser": "chrome",
+    "liveServer.settings.https": false,
+    "liveServer.settings.useLocalIp": false,
+    "liveServer.settings.mount": [
+        [
+            "/",
+            "./"
+        ]
+    ],
+    "editor.formatOnSave": true,
+    "editor.codeActionsOnSave": {
+        "source.fixAll": true
+    },
+    "javascript.suggest.autoImports": true,
+    "typescript.suggest.autoImports": true
+}
