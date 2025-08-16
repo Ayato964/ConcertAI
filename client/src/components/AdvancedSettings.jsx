@@ -18,7 +18,7 @@ const AdvancedSettings = ({ instrument, setInstrument }) => {
                         </Select>
                     </FormControl>
                     <Typography gutterBottom>Temperature</Typography>
-                    <Slider defaultValue={0.5} step={0.02} marks min={0.1} max={1.5} valueLabelDisplay="auto" />
+                    <Slider defaultValue={1.0} step={0.02} marks min={0.1} max={1.5} valueLabelDisplay="auto" />
                     <Typography gutterBottom>Number of Generations</Typography>
                     <FormControl fullWidth size="small">
                         <InputLabel>Count</InputLabel>

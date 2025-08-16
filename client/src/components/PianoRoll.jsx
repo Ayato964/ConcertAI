@@ -35,7 +35,7 @@ const NoteBar = ({ note, pixelsPerSecond }) => {
     );
 };
 
-const PianoRoll = ({ midiData, progress, duration, generationLength, setGenerationLength }) => {
+const PianoRoll = ({ midiData, progress, duration, generationLength, setGenerationLength, onSeek }) => {
     const pixelsPerSecond = 80;
     const allNotes = midiData ? midiData.tracks.flatMap(track => track.notes) : [];
 
@@ -53,6 +53,17 @@ const PianoRoll = ({ midiData, progress, duration, generationLength, setGenerati
 
     const playbackIndicatorPosition = progress * totalDuration * pixelsPerSecond;
 
+    const handleContainerClick = (e) => {
+        if (e.shiftKey) {
+            const rect = e.currentTarget.getBoundingClientRect();
+            const x = e.clientX - rect.left;
+            const time = x / pixelsPerSecond;
+            if (onSeek) {
+                onSeek(time);
+            }
+        }
+    };
+
     const handleMeasureClick = (measureIndex) => {
         setGenerationLength(measureIndex + 1);
     };
@@ -67,17 +78,17 @@ const PianoRoll = ({ midiData, progress, duration, generationLength, setGenerati
                 overflow: 'auto',
                 position: 'relative',
                 backgroundColor: 'background.paper',
-                paddingTop: `${MEASURE_HEADER_HEIGHT}px`
             }}
         >
-            {/* Measure Header */}
+            {/* Sticky Measure Header */}
             <Box sx={{
-                position: 'absolute',
+                position: 'sticky',
                 top: 0,
                 left: 0,
                 width: `${contentWidth}px`,
                 height: `${MEASURE_HEADER_HEIGHT}px`,
                 display: 'flex',
+                backgroundColor: 'background.default',
                 zIndex: 5
             }}>
                 {Array.from({ length: totalMeasures }).map((_, i) => (
@@ -92,15 +103,21 @@ const PianoRoll = ({ midiData, progress, duration, generationLength, setGenerati
                 ))}
             </Box>
 
-            <Box sx={{
-                width: `${contentWidth}px`,
-                height: `${contentHeight}px`,
-                position: 'relative',
+            <Box 
+                onClick={handleContainerClick}
+                sx={{
+                    width: `${contentWidth}px`,
+                    height: `${contentHeight}px`,
+                    position: 'relative',
+                    cursor: 'pointer'
             }}>
                 {Array.from({ length: totalMeasures }).map((_, i) => (
                     <Box
                         key={i}
-                        onClick={() => handleMeasureClick(i)}
+                        onClick={(e) => {
+                            e.stopPropagation(); // Prevent container click when clicking measure
+                            handleMeasureClick(i)
+                        }}
                         sx={{
                             position: 'absolute',
                             left: `${i * pixelsPerMeasure}px`,
@@ -110,7 +127,6 @@ const PianoRoll = ({ midiData, progress, duration, generationLength, setGenerati
                             backgroundColor: i < generationLength ? 'rgba(0, 128, 255, 0.1)' : 'transparent',
                             borderRight: '1px solid grey', // Darker divider
                             zIndex: 1,
-                            cursor: 'pointer'
                         }}
                     />
                 ))}

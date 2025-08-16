@@ -110,6 +110,11 @@ function App() {
     setIsPlaying(false);
   };
 
+  const handleSeek = (time) => {
+    Tone.Transport.position = time;
+    setProgress(Tone.Transport.progress);
+  };
+
   useEffect(() => {
     if (isPlaying) {
       const id = Tone.Transport.scheduleRepeat(time => {
@@ -137,37 +142,32 @@ function App() {
             <Typography sx={{ ml: 2 }}>Loading Samples...</Typography>
           </Box>
         ) : (
-          <Box>
-            <Grid container spacing={2}>
-              <Grid item xs={12}>
-                <MidiInput onMidiUpload={handleMidiUpload} />
-              </Grid>
-              <Grid item xs={12}>
-                <AdvancedSettings
-                  instrument={instrument}
-                  setInstrument={setInstrument}
-                />
-              </Grid>
-              <Grid item xs={12}>
-                <Controls
-                  onPlay={handlePlay}
-                  onStop={handleStop}
-                  isPlaying={isPlaying}
-                  progress={progress}
-                  duration={duration}
-                />
-              </Grid>
-              <Grid item xs={12}>
-                <PianoRoll
-                  midiData={midiData}
-                  progress={progress}
-                  duration={duration}
-                  generationLength={generationLength}
-                  setGenerationLength={setGenerationLength}
-                />
-              </Grid>
+          <Grid container spacing={4}>
+            <Grid item xs={12} md={4}>
+              <MidiInput onMidiUpload={handleMidiUpload} />
+              <AdvancedSettings
+                instrument={instrument}
+                setInstrument={setInstrument}
+              />
+              <Controls
+                onPlay={handlePlay}
+                onStop={handleStop}
+                isPlaying={isPlaying}
+                progress={progress}
+                duration={duration}
+              />
             </Grid>
-          </Box>
+            <Grid item xs={12} md={8}>
+              <PianoRoll
+                midiData={midiData}
+                progress={progress}
+                duration={duration}
+                generationLength={generationLength}
+                setGenerationLength={setGenerationLength}
+                onSeek={handleSeek}
+              />
+            </Grid>
+          </Grid>
         )}
       </Container>
     </ThemeProvider>
