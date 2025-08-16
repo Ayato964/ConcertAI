@@ -20,7 +20,7 @@
     ],
     "editor.formatOnSave": true,
     "editor.codeActionsOnSave": {
-        "source.fixAll": true
+        "source.fixAll": "explicit"
     },
     "javascript.suggest.autoImports": true,
     "typescript.suggest.autoImports": true
