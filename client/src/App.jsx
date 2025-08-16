@@ -28,59 +28,60 @@ function App() {
   const [isPlaying, setIsPlaying] = useState(false);
   const [progress, setProgress] = useState(0);
   const [samplerLoaded, setSamplerLoaded] = useState(false);
+  const [generationLength, setGenerationLength] = useState(12);
+  const [instrument, setInstrument] = useState('piano');
 
   const samplerRef = useRef(null);
   const scheduledEventsRef = useRef([]);
 
   useEffect(() => {
-    samplerRef.current = new Tone.Sampler({
-      urls: {
-        A0: 'A0.mp3',
-        C1: 'C1.mp3',
-        'D#1': 'Ds1.mp3',
-        'F#1': 'Fs1.mp3',
-        A1: 'A1.mp3',
-        C2: 'C2.mp3',
-        'D#2': 'Ds2.mp3',
-        'F#2': 'Fs2.mp3',
-        A2: 'A2.mp3',
-        C3: 'C3.mp3',
-        'D#3': 'Ds3.mp3',
-        'F#3': 'Fs3.mp3',
-        A3: 'A3.mp3',
-        C4: 'C4.mp3',
-        'D#4': 'Ds4.mp3',
-        'F#4': 'Fs4.mp3',
-        A4: 'A4.mp3',
-        C5: 'C5.mp3',
-        'D#5': 'Ds5.mp3',
-        'F#5': 'Fs5.mp3',
-        A5: 'A5.mp3',
-        C6: 'C6.mp3',
-      },
-      release: 1,
-      baseUrl: 'https://tonejs.github.io/audio/salamander/',
-      onload: () => {
-        setSamplerLoaded(true);
-      }
-    }).toDestination();
-  }, []);
+    setSamplerLoaded(false);
+    if (samplerRef.current) {
+      samplerRef.current.dispose();
+    }
+
+    if (instrument === 'piano') {
+      samplerRef.current = new Tone.Sampler({
+        urls: {
+          A0: 'A0.mp3', C1: 'C1.mp3', 'D#1': 'Ds1.mp3', 'F#1': 'Fs1.mp3', A1: 'A1.mp3',
+          C2: 'C2.mp3', 'D#2': 'Ds2.mp3', 'F#2': 'Fs2.mp3', A2: 'A2.mp3', C3: 'C3.mp3',
+          'D#3': 'Ds3.mp3', 'F#3': 'Fs3.mp3', A3: 'A3.mp3', C4: 'C4.mp3', 'D#4': 'Ds4.mp3',
+          'F#4': 'Fs4.mp3', A4: 'A4.mp3', C5: 'C5.mp3', 'D#5': 'Ds5.mp3', 'F#5': 'Fs5.mp3',
+          A5: 'A5.mp3', C6: 'C6.mp3',
+        },
+        release: 1,
+        baseUrl: 'https://tonejs.github.io/audio/salamander/',
+        onload: () => {
+          setSamplerLoaded(true);
+        }
+      }).toDestination();
+    } else if (instrument === 'saxophone') {
+      // Using FMSynth as a placeholder for saxophone
+      samplerRef.current = new Tone.FMSynth().toDestination();
+      setSamplerLoaded(true);
+    }
+  }, [instrument]);
 
   useEffect(() => {
-    if (midiData) {
+    if (midiData && samplerLoaded) {
       // Clear any previously scheduled events
       scheduledEventsRef.current.forEach(id => Tone.Transport.clear(id));
       scheduledEventsRef.current = [];
 
-      if (samplerLoaded) {
-        const notes = midiData.tracks.flatMap(track => track.notes);
-        const scheduledEvents = notes.map(note =>
-          Tone.Transport.schedule(time => {
+      const notes = midiData.tracks.flatMap(track => track.notes);
+      const scheduledEvents = notes.map(note =>
+        Tone.Transport.schedule(time => {
+          if(samplerRef.current) {
             samplerRef.current.triggerAttackRelease(note.name, note.duration, time, note.velocity);
-          }, note.time)
-        );
-        scheduledEventsRef.current = scheduledEvents;
-      }
+          }
+        }, note.time)
+      );
+      scheduledEventsRef.current = scheduledEvents;
+
+      // Set transport loop for playback progress
+      Tone.Transport.loop = true;
+      Tone.Transport.loopStart = 0;
+      Tone.Transport.loopEnd = midiData.duration;
     }
   }, [midiData, samplerLoaded]);
 
@@ -110,18 +111,16 @@ function App() {
   };
 
   useEffect(() => {
-    let animationFrameId;
-    const animationFrame = () => {
-      if (Tone.Transport.state === 'started') {
-        setProgress(Tone.Transport.progress);
-        animationFrameId = requestAnimationFrame(animationFrame);
-      }
-    };
     if (isPlaying) {
-      animationFrameId = requestAnimationFrame(animationFrame);
-    }
-    return () => {
-      cancelAnimationFrame(animationFrameId);
+      const id = Tone.Transport.scheduleRepeat(time => {
+        Tone.Draw.schedule(() => {
+          setProgress(Tone.Transport.progress);
+        }, time);
+      }, '16n');
+
+      return () => {
+        Tone.Transport.clear(id);
+      };
     }
   }, [isPlaying]);
 
@@ -131,37 +130,44 @@ function App() {
     <ThemeProvider theme={theme}>
       <CssBaseline />
       <Header toggleColorMode={toggleColorMode} mode={theme.palette.mode} />
-      <Container maxWidth="lg" sx={{ my: 2 }}>
+      <Container maxWidth="xl" sx={{ my: 2 }}>
         {!samplerLoaded ? (
           <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '80vh' }}>
             <CircularProgress />
-            <Typography sx={{ ml: 2 }}>Loading Piano Samples...</Typography>
+            <Typography sx={{ ml: 2 }}>Loading Samples...</Typography>
           </Box>
         ) : (
-          <Grid container spacing={4}>
-            <Grid item xs={12} md={5}>
-              <Grid container spacing={2}>
-                <Grid item xs={12}>
-                  <MidiInput onMidiUpload={handleMidiUpload} />
-                </Grid>
-                <Grid item xs={12}>
-                  <AdvancedSettings />
-                </Grid>
-                <Grid item xs={12}>
-                  <Controls
-                    onPlay={handlePlay}
-                    onStop={handleStop}
-                    isPlaying={isPlaying}
-                    progress={progress}
-                    duration={duration}
-                  />
-                </Grid>
+          <Box>
+            <Grid container spacing={2}>
+              <Grid item xs={12}>
+                <MidiInput onMidiUpload={handleMidiUpload} />
+              </Grid>
+              <Grid item xs={12}>
+                <AdvancedSettings
+                  instrument={instrument}
+                  setInstrument={setInstrument}
+                />
+              </Grid>
+              <Grid item xs={12}>
+                <Controls
+                  onPlay={handlePlay}
+                  onStop={handleStop}
+                  isPlaying={isPlaying}
+                  progress={progress}
+                  duration={duration}
+                />
+              </Grid>
+              <Grid item xs={12}>
+                <PianoRoll
+                  midiData={midiData}
+                  progress={progress}
+                  duration={duration}
+                  generationLength={generationLength}
+                  setGenerationLength={setGenerationLength}
+                />
               </Grid>
             </Grid>
-            <Grid item xs={12} md={7}>
-              <PianoRoll midiData={midiData} progress={progress} duration={duration} />
-            </Grid>
-          </Grid>
+          </Box>
         )}
       </Container>
     </ThemeProvider>

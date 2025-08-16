@@ -1,7 +1,8 @@
 import React from 'react';
 import { Box, Typography } from '@mui/material';
 
-const NOTE_HEIGHT = 6;
+const NOTE_HEIGHT = 20; // Increased note height
+const MEASURE_HEADER_HEIGHT = 30;
 
 const NoteBar = ({ note, pixelsPerSecond }) => {
     const top = (127 - note.midi) * NOTE_HEIGHT;
@@ -19,12 +20,22 @@ const NoteBar = ({ note, pixelsPerSecond }) => {
                 backgroundColor: 'primary.main',
                 borderRadius: '2px',
                 zIndex: 3,
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                overflow: 'hidden',
             }}
-        />
+        >
+            {width > 20 && (
+                <Typography variant="caption" sx={{ color: 'white', userSelect: 'none' }}>
+                    {note.name}
+                </Typography>
+            )}
+        </Box>
     );
 };
 
-const PianoRoll = ({ midiData, progress, duration }) => {
+const PianoRoll = ({ midiData, progress, duration, generationLength, setGenerationLength }) => {
     const pixelsPerSecond = 80;
     const allNotes = midiData ? midiData.tracks.flatMap(track => track.notes) : [];
 
@@ -40,9 +51,11 @@ const PianoRoll = ({ midiData, progress, duration }) => {
     const contentWidth = totalMeasures * pixelsPerMeasure;
     const contentHeight = 128 * NOTE_HEIGHT;
 
-    const measureLines = Array.from({ length: totalMeasures }, (_, i) => (i + 1) * pixelsPerMeasure);
-
     const playbackIndicatorPosition = progress * totalDuration * pixelsPerSecond;
+
+    const handleMeasureClick = (measureIndex) => {
+        setGenerationLength(measureIndex + 1);
+    };
 
     return (
         <Box
@@ -50,19 +63,56 @@ const PianoRoll = ({ midiData, progress, duration }) => {
                 my: 2,
                 border: '1px solid lightgrey',
                 borderRadius: '4px',
-                height: '300px',
-                overflowX: 'auto',
+                height: '500px',
+                overflow: 'auto',
                 position: 'relative',
                 backgroundColor: 'background.paper',
+                paddingTop: `${MEASURE_HEADER_HEIGHT}px`
             }}
         >
+            {/* Measure Header */}
+            <Box sx={{
+                position: 'absolute',
+                top: 0,
+                left: 0,
+                width: `${contentWidth}px`,
+                height: `${MEASURE_HEADER_HEIGHT}px`,
+                display: 'flex',
+                zIndex: 5
+            }}>
+                {Array.from({ length: totalMeasures }).map((_, i) => (
+                    <Box key={i} sx={{
+                        width: `${pixelsPerMeasure}px`,
+                        borderRight: '1px solid grey',
+                        textAlign: 'center',
+                        color: 'text.secondary'
+                    }}>
+                        {i + 1}
+                    </Box>
+                ))}
+            </Box>
+
             <Box sx={{
                 width: `${contentWidth}px`,
                 height: `${contentHeight}px`,
                 position: 'relative',
             }}>
-                {measureLines.map((pos, i) => (
-                    <Box key={i} sx={{ position: 'absolute', left: `${pos}px`, top: 0, height: '100%', width: '1px', backgroundColor: 'divider', zIndex: 2 }} />
+                {Array.from({ length: totalMeasures }).map((_, i) => (
+                    <Box
+                        key={i}
+                        onClick={() => handleMeasureClick(i)}
+                        sx={{
+                            position: 'absolute',
+                            left: `${i * pixelsPerMeasure}px`,
+                            top: 0,
+                            width: `${pixelsPerMeasure}px`,
+                            height: '100%',
+                            backgroundColor: i < generationLength ? 'rgba(0, 128, 255, 0.1)' : 'transparent',
+                            borderRight: '1px solid grey', // Darker divider
+                            zIndex: 1,
+                            cursor: 'pointer'
+                        }}
+                    />
                 ))}
                 {allNotes.map((note, index) => (
                     <NoteBar key={index} note={note} pixelsPerSecond={pixelsPerSecond} />
