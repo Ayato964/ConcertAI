@@ -16,7 +16,7 @@ const MidiInput = ({ onMidiUpload }) => {
     return (
         <Box sx={{ my: 2, p: 2, border: '1px dashed grey', borderRadius: '4px' }}>
             <Typography variant="subtitle1" gutterBottom>Input MIDI</Typography>
-            <Box sx={{ display: 'flex', gap: 2, alignItems: 'center' }}>
+            <Box sx={{ display: 'flex', gap: 2, alignItems: { xs: 'flex-start', sm: 'center' }, flexDirection: { xs: 'column', sm: 'row' }, flexWrap: 'wrap' }}>
                 <Button variant="contained" component="label">
                     Upload File
                     <input type="file" hidden accept=".mid,.midi" onChange={handleFileChange} />

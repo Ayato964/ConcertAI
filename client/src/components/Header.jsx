@@ -1,13 +1,24 @@
 import React from 'react';
-import { AppBar, Toolbar, Typography } from '@mui/material';
+import { AppBar, Toolbar, Typography, Box, IconButton } from '@mui/material';
+import Brightness4Icon from '@mui/icons-material/Brightness4';
+import Brightness7Icon from '@mui/icons-material/Brightness7';
+import ModelSelector from './ModelSelector';
 
-const Header = () => {
+const Header = ({ toggleColorMode, mode }) => {
     return (
         <AppBar position="static">
             <Toolbar>
                 <Typography variant="h6" component="div" sx={{ flexGrow: 1 }}>
                     MORTM - Melody Generation
                 </Typography>
+                <Box sx={{ flexGrow: 1, display: 'flex', justifyContent: 'center' }}>
+                    <ModelSelector />
+                </Box>
+                <Box sx={{ flexGrow: 1, display: 'flex', justifyContent: 'flex-end' }}>
+                    <IconButton onClick={toggleColorMode} color="inherit">
+                        {mode === 'dark' ? <Brightness7Icon /> : <Brightness4Icon />}
+                    </IconButton>
+                </Box>
             </Toolbar>
         </AppBar>
     );

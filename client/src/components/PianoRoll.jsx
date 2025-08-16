@@ -24,7 +24,7 @@ const NoteBar = ({ note, pixelsPerSecond }) => {
     );
 };
 
-const PianoRoll = ({ midiData, selectedMeasure, setSelectedMeasure }) => {
+const PianoRoll = ({ midiData, progress, duration }) => {
     const pixelsPerSecond = 80;
     const allNotes = midiData ? midiData.tracks.flatMap(track => track.notes) : [];
 
@@ -34,7 +34,7 @@ const PianoRoll = ({ midiData, selectedMeasure, setSelectedMeasure }) => {
     const secondsPerMeasure = (60 / bpm) * timeSignature[0];
     const pixelsPerMeasure = secondsPerMeasure * pixelsPerSecond;
 
-    const totalDuration = allNotes.length > 0 ? Math.max(...allNotes.map(n => n.time + n.duration)) : 0;
+    const totalDuration = duration;
     const totalMeasures = totalDuration > 0 ? Math.ceil(totalDuration / secondsPerMeasure) : 12;
 
     const contentWidth = totalMeasures * pixelsPerMeasure;
@@ -42,17 +42,10 @@ const PianoRoll = ({ midiData, selectedMeasure, setSelectedMeasure }) => {
 
     const measureLines = Array.from({ length: totalMeasures }, (_, i) => (i + 1) * pixelsPerMeasure);
 
-    const handleClick = (event) => {
-        const rect = event.currentTarget.getBoundingClientRect();
-        const x = event.clientX - rect.left + event.currentTarget.scrollLeft;
-        const clickedMeasure = Math.floor(x / pixelsPerMeasure);
-        const newMeasure = Math.min(clickedMeasure + 1, 12);
-        setSelectedMeasure(newMeasure);
-    };
+    const playbackIndicatorPosition = progress * totalDuration * pixelsPerSecond;
 
     return (
         <Box
-            onClick={handleClick}
             sx={{
                 my: 2,
                 border: '1px solid lightgrey',
@@ -61,7 +54,6 @@ const PianoRoll = ({ midiData, selectedMeasure, setSelectedMeasure }) => {
                 overflowX: 'auto',
                 position: 'relative',
                 backgroundColor: 'background.paper',
-                cursor: 'pointer',
             }}
         >
             <Box sx={{
@@ -69,22 +61,24 @@ const PianoRoll = ({ midiData, selectedMeasure, setSelectedMeasure }) => {
                 height: `${contentHeight}px`,
                 position: 'relative',
             }}>
-                <Box
-                    sx={{
-                        position: 'absolute',
-                        height: '100%',
-                        width: `${selectedMeasure * pixelsPerMeasure}px`,
-                        backgroundColor: 'rgba(0, 128, 255, 0.2)',
-                        zIndex: 1,
-                        pointerEvents: 'none',
-                    }}
-                />
                 {measureLines.map((pos, i) => (
                     <Box key={i} sx={{ position: 'absolute', left: `${pos}px`, top: 0, height: '100%', width: '1px', backgroundColor: 'divider', zIndex: 2 }} />
                 ))}
                 {allNotes.map((note, index) => (
                     <NoteBar key={index} note={note} pixelsPerSecond={pixelsPerSecond} />
                 ))}
+                <Box
+                    sx={{
+                        position: 'absolute',
+                        left: `${playbackIndicatorPosition}px`,
+                        top: 0,
+                        height: '100%',
+                        width: '2px',
+                        backgroundColor: 'red',
+                        zIndex: 4,
+                        pointerEvents: 'none',
+                    }}
+                />
             </Box>
 
             {!midiData && (
