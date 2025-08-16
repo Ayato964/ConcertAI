@@ -3,6 +3,7 @@ import { Container, CssBaseline, Box, ThemeProvider, createTheme, Grid, Circular
 import * as Tone from 'tone';
 import Header from './components/Header.jsx';
 import MidiInput from './components/MidiInput.jsx';
+import Settings from './components/Settings.jsx';
 import AdvancedSettings from './components/AdvancedSettings.jsx';
 import Controls from './components/Controls.jsx';
 import PianoRoll from './components/PianoRoll.jsx';
@@ -30,6 +31,7 @@ function App() {
   const [samplerLoaded, setSamplerLoaded] = useState(false);
   const [generationLength, setGenerationLength] = useState(12);
   const [instrument, setInstrument] = useState('piano');
+  const [tempo, setTempo] = useState(120);
 
   const samplerRef = useRef(null);
   const scheduledEventsRef = useRef([]);
@@ -85,11 +87,18 @@ function App() {
     }
   }, [midiData, samplerLoaded]);
 
+  useEffect(() => {
+    Tone.Transport.bpm.value = tempo;
+  }, [tempo]);
+
   const handleMidiUpload = (newMidiData) => {
     if (isPlaying) {
       handleStop();
     }
     setMidiData(newMidiData);
+    if (newMidiData.header.tempos.length > 0) {
+      setTempo(Math.round(newMidiData.header.tempos[0].bpm));
+    }
   };
 
   const handlePlay = async () => {
@@ -143,12 +152,15 @@ function App() {
           </Box>
         ) : (
           <Grid container spacing={4}>
-            <Grid item xs={12} md={4}>
+            <Grid item xs={12} md={5}>
               <MidiInput onMidiUpload={handleMidiUpload} />
-              <AdvancedSettings
+              <Settings 
                 instrument={instrument}
                 setInstrument={setInstrument}
+                tempo={tempo}
+                setTempo={setTempo}
               />
+              <AdvancedSettings />
               <Controls
                 onPlay={handlePlay}
                 onStop={handleStop}
@@ -157,7 +169,7 @@ function App() {
                 duration={duration}
               />
             </Grid>
-            <Grid item xs={12} md={8}>
+            <Grid item xs={12} md={7}>
               <PianoRoll
                 midiData={midiData}
                 progress={progress}

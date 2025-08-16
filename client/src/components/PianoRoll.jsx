@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useRef, useEffect } from 'react';
 import { Box, Typography } from '@mui/material';
 
 const NOTE_HEIGHT = 20; // Increased note height
@@ -53,6 +53,26 @@ const PianoRoll = ({ midiData, progress, duration, generationLength, setGenerati
 
     const playbackIndicatorPosition = progress * totalDuration * pixelsPerSecond;
 
+    const scrollContainerRef = useRef(null);
+
+    useEffect(() => {
+        if (midiData && scrollContainerRef.current) {
+            const allNotesInMidi = midiData.tracks.flatMap(track => track.notes);
+            if (allNotesInMidi.length > 0) {
+                const minNote = Math.min(...allNotesInMidi.map(n => n.midi));
+                const maxNote = Math.max(...allNotesInMidi.map(n => n.midi));
+
+                const centerNoteMidi = (maxNote + minNote) / 2;
+                const centerNoteY = (127 - centerNoteMidi) * NOTE_HEIGHT;
+
+                const containerHeight = scrollContainerRef.current.clientHeight;
+                const scrollTop = centerNoteY - (containerHeight / 2);
+
+                scrollContainerRef.current.scrollTop = scrollTop;
+            }
+        }
+    }, [midiData]);
+
     const handleContainerClick = (e) => {
         if (e.shiftKey) {
             const rect = e.currentTarget.getBoundingClientRect();
@@ -79,6 +99,7 @@ const PianoRoll = ({ midiData, progress, duration, generationLength, setGenerati
                 position: 'relative',
                 backgroundColor: 'background.paper',
             }}
+            ref={scrollContainerRef}
         >
             {/* Sticky Measure Header */}
             <Box sx={{
