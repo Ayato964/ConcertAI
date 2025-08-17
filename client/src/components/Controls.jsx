@@ -1,9 +1,10 @@
 import React from 'react';
 import { Box, Button, IconButton, Slider, Typography } from '@mui/material';
 import PlayArrowIcon from '@mui/icons-material/PlayArrow';
+import PauseIcon from '@mui/icons-material/Pause';
 import StopIcon from '@mui/icons-material/Stop';
 
-const Controls = ({ onPlay, onStop, isPlaying, progress, duration }) => {
+const Controls = ({ onPlay, onPause, onStop, playbackState, progress, duration }) => {
     return (
         <Box sx={{ my: 2 }}>
             <Box
@@ -14,10 +15,13 @@ const Controls = ({ onPlay, onStop, isPlaying, progress, duration }) => {
                     flexWrap: 'wrap',
                 }}
             >
-                <IconButton color="primary" onClick={onPlay} disabled={isPlaying}>
+                <IconButton color="primary" onClick={onPlay} disabled={playbackState === 'playing'}>
                     <PlayArrowIcon />
                 </IconButton>
-                <IconButton onClick={onStop} disabled={!isPlaying}>
+                <IconButton color="primary" onClick={onPause} disabled={playbackState !== 'playing'}>
+                    <PauseIcon />
+                </IconButton>
+                <IconButton onClick={onStop} disabled={playbackState === 'stopped'}>
                     <StopIcon />
                 </IconButton>
                 <Button

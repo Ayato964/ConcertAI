@@ -26,7 +26,7 @@ function App() {
   };
 
   const [midiData, setMidiData] = useState(null);
-  const [isPlaying, setIsPlaying] = useState(false);
+  const [playbackState, setPlaybackState] = useState('stopped'); // 'stopped', 'playing', 'paused'
   const [progress, setProgress] = useState(0);
   const [samplerLoaded, setSamplerLoaded] = useState(false);
   const [generationLength, setGenerationLength] = useState(12);
@@ -92,7 +92,7 @@ function App() {
   }, [tempo]);
 
   const handleMidiUpload = (newMidiData) => {
-    if (isPlaying) {
+    if (playbackState !== 'stopped') {
       handleStop();
     }
     setMidiData(newMidiData);
@@ -108,15 +108,24 @@ function App() {
       await Tone.start();
     }
 
-    Tone.Transport.start();
-    setIsPlaying(true);
+    if (playbackState === 'paused') {
+      Tone.Transport.start();
+    } else {
+      Tone.Transport.start();
+    }
+    setPlaybackState('playing');
+  };
+
+  const handlePause = () => {
+    Tone.Transport.pause();
+    setPlaybackState('paused');
   };
 
   const handleStop = () => {
     Tone.Transport.stop();
     Tone.Transport.position = 0;
     setProgress(0);
-    setIsPlaying(false);
+    setPlaybackState('stopped');
   };
 
   const handleSeek = (time) => {
@@ -125,7 +134,7 @@ function App() {
   };
 
   useEffect(() => {
-    if (isPlaying) {
+    if (playbackState === 'playing') {
       const id = Tone.Transport.scheduleRepeat(time => {
         Tone.Draw.schedule(() => {
           setProgress(Tone.Transport.progress);
@@ -136,7 +145,7 @@ function App() {
         Tone.Transport.clear(id);
       };
     }
-  }, [isPlaying]);
+  }, [playbackState]);
 
   const duration = midiData ? midiData.duration : 0;
 
@@ -163,8 +172,9 @@ function App() {
               <AdvancedSettings />
               <Controls
                 onPlay={handlePlay}
+                onPause={handlePause}
                 onStop={handleStop}
-                isPlaying={isPlaying}
+                playbackState={playbackState}
                 progress={progress}
                 duration={duration}
               />
