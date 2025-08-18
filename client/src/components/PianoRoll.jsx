@@ -62,10 +62,8 @@ const PianoRoll = ({ midiData, progress, duration, generationLength, setGenerati
     const scrollContainerRef = useRef(null);
 
     useEffect(() => {
+        const scrollContainer = scrollContainerRef.current;
         const handleWheel = (e) => {
-            if (!scrollContainerRef.current.contains(e.target)) {
-                return;
-            }
             e.preventDefault();
             if (e.ctrlKey) {
                 const zoomFactor = e.deltaY > 0 ? 0.9 : 1.1;
@@ -74,14 +72,20 @@ const PianoRoll = ({ midiData, progress, duration, generationLength, setGenerati
                 const zoomFactor = e.deltaY > 0 ? 0.9 : 1.1;
                 setVerticalZoom(prev => Math.max(0.1, Math.min(prev * zoomFactor, 5)));
             } else if (e.shiftKey) {
-                scrollContainerRef.current.scrollLeft += e.deltaY;
+                scrollContainer.scrollLeft += e.deltaY;
+            } else {
+                scrollContainer.scrollTop += e.deltaY;
             }
         };
 
-        window.addEventListener('wheel', handleWheel, { passive: false });
+        if (scrollContainer) {
+            scrollContainer.addEventListener('wheel', handleWheel, { passive: false });
+        }
 
         return () => {
-            window.removeEventListener('wheel', handleWheel);
+            if (scrollContainer) {
+                scrollContainer.removeEventListener('wheel', handleWheel);
+            }
         };
     }, []);
 
@@ -205,6 +209,20 @@ const PianoRoll = ({ midiData, progress, duration, generationLength, setGenerati
                             }}
                         />
                     ))}
+                    {selectedMeasures[0] !== 0 || selectedMeasures[1] !== 0 ? (
+                        <Box
+                            sx={{
+                                position: 'absolute',
+                                left: `${selectedMeasures[0] * pixelsPerMeasure}px`,
+                                top: 0,
+                                width: `${(selectedMeasures[1] - selectedMeasures[0] + 1) * pixelsPerMeasure}px`,
+                                height: '100%',
+                                backgroundColor: 'rgba(0, 128, 255, 0.3)',
+                                zIndex: 2,
+                                pointerEvents: 'none',
+                            }}
+                        />
+                    ) : null}
                     {allNotes.map((note, index) => (
                         <NoteBar key={index} note={note} pixelsPerSecond={pixelsPerSecond} verticalZoom={verticalZoom} />
                     ))}
