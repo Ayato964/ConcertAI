@@ -62,6 +62,30 @@ const PianoRoll = ({ midiData, progress, duration, generationLength, setGenerati
     const scrollContainerRef = useRef(null);
 
     useEffect(() => {
+        const handleWheel = (e) => {
+            if (!scrollContainerRef.current.contains(e.target)) {
+                return;
+            }
+            e.preventDefault();
+            if (e.ctrlKey) {
+                const zoomFactor = e.deltaY > 0 ? 0.9 : 1.1;
+                setHorizontalZoom(prev => Math.max(0.1, Math.min(prev * zoomFactor, 5)));
+            } else if (e.altKey) {
+                const zoomFactor = e.deltaY > 0 ? 0.9 : 1.1;
+                setVerticalZoom(prev => Math.max(0.1, Math.min(prev * zoomFactor, 5)));
+            } else if (e.shiftKey) {
+                scrollContainerRef.current.scrollLeft += e.deltaY;
+            }
+        };
+
+        window.addEventListener('wheel', handleWheel, { passive: false });
+
+        return () => {
+            window.removeEventListener('wheel', handleWheel);
+        };
+    }, []);
+
+    useEffect(() => {
         if (midiData && scrollContainerRef.current) {
             const allNotesInMidi = midiData.tracks.flatMap(track => track.notes);
             if (allNotesInMidi.length > 0) {
@@ -77,7 +101,7 @@ const PianoRoll = ({ midiData, progress, duration, generationLength, setGenerati
                 scrollContainerRef.current.scrollTop = scrollTop;
             }
         }
-    }, [midiData, verticalZoom]);
+    }, [midiData, verticalZoom, NOTE_HEIGHT]);
 
     const handleContainerClick = (e) => {
         const rect = e.currentTarget.getBoundingClientRect();

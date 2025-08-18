@@ -147,6 +147,25 @@ function App() {
     }
   }, [playbackState]);
 
+  useEffect(() => {
+    const handleKeyDown = (event) => {
+      if (event.code === 'Space') {
+        event.preventDefault();
+        if (playbackState === 'playing') {
+          handlePause();
+        } else {
+          handlePlay();
+        }
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+
+    return () => {
+      window.removeEventListener('keydown', handleKeyDown);
+    };
+  }, [playbackState, handlePlay, handlePause]);
+
   const duration = midiData ? midiData.duration : 0;
 
   return (

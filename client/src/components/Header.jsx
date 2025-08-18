@@ -3,6 +3,7 @@ import { AppBar, Toolbar, Typography, Box, IconButton } from '@mui/material';
 import Brightness4Icon from '@mui/icons-material/Brightness4';
 import Brightness7Icon from '@mui/icons-material/Brightness7';
 import ModelSelector from './ModelSelector';
+import ShortcutGuide from './ShortcutGuide';
 
 const Header = ({ toggleColorMode, mode }) => {
     return (
@@ -14,7 +15,8 @@ const Header = ({ toggleColorMode, mode }) => {
                 <Box sx={{ flexGrow: 1, display: 'flex', justifyContent: 'center' }}>
                     <ModelSelector />
                 </Box>
-                <Box sx={{ flexGrow: 1, display: 'flex', justifyContent: 'flex-end' }}>
+                <Box sx={{ flexGrow: 1, display: 'flex', justifyContent: 'flex-end', alignItems: 'center' }}>
+                    <ShortcutGuide />
                     <IconButton onClick={toggleColorMode} color="inherit">
                         {mode === 'dark' ? <Brightness7Icon /> : <Brightness4Icon />}
                     </IconButton>
