@@ -1,8 +1,9 @@
 import React from 'react';
 import { Accordion, AccordionSummary, AccordionDetails, Typography, FormControl, InputLabel, Select, MenuItem, Box, TextField } from '@mui/material';
 import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
+import ModelSelector from './ModelSelector';
 
-const Settings = ({ instrument, setInstrument, tempo, setTempo }) => {
+const Settings = ({ instrument, setInstrument, tempo, setTempo, selectedModel, setSelectedModel }) => {
 
     const handleTempoChange = (e) => {
         const value = e.target.value;
@@ -18,6 +19,7 @@ const Settings = ({ instrument, setInstrument, tempo, setTempo }) => {
             </AccordionSummary>
             <AccordionDetails>
                 <Box>
+                    <ModelSelector selectedModel={selectedModel} setSelectedModel={setSelectedModel} />
                     <FormControl fullWidth margin="normal">
                         <InputLabel>Instrument</InputLabel>
                         <Select value={instrument} label="Instrument" onChange={(e) => setInstrument(e.target.value)}>

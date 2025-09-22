@@ -1,9 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import { FormControl, InputLabel, Select, MenuItem, Typography } from '@mui/material';
 
-const ModelSelector = () => {
+const ModelSelector = ({ selectedModel, setSelectedModel }) => {
     const [models, setModels] = useState([]);
-    const [selectedModel, setSelectedModel] = useState('');
     const [modelDescriptions, setModelDescriptions] = useState({});
 
     useEffect(() => {
@@ -19,19 +18,19 @@ const ModelSelector = () => {
                 }, {});
                 setModels(modelNames);
                 setModelDescriptions(descriptions);
-                if (modelNames.length > 0) {
+                if (modelNames.length > 0 && !selectedModel) {
                     setSelectedModel(modelNames[0]);
                 }
             })
             .catch(error => console.error('Error fetching models:', error));
-    }, []);
+    }, [selectedModel, setSelectedModel]);
 
     const handleChange = (event) => {
         setSelectedModel(event.target.value);
     };
 
     return (
-        <FormControl fullWidth sx={{ mt: 2 }}>
+        <FormControl fullWidth margin="normal">
             <InputLabel>Model</InputLabel>
             <Select
                 value={selectedModel}

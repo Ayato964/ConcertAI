@@ -32,6 +32,7 @@ function App() {
   const [generationLength, setGenerationLength] = useState(12);
   const [instrument, setInstrument] = useState('piano');
   const [tempo, setTempo] = useState(120);
+  const [selectedModel, setSelectedModel] = useState('');
 
   const samplerRef = useRef(null);
   const scheduledEventsRef = useRef([]);
@@ -187,6 +188,8 @@ function App() {
                 setInstrument={setInstrument}
                 tempo={tempo}
                 setTempo={setTempo}
+                selectedModel={selectedModel}
+                setSelectedModel={setSelectedModel}
               />
               <AdvancedSettings />
               <Controls
