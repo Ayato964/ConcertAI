@@ -1,13 +1,30 @@
-import React from 'react';
-import { FormControl, InputLabel, Select, MenuItem } from '@mui/material';
+import React, { useState, useEffect } from 'react';
+import { FormControl, InputLabel, Select, MenuItem, Typography } from '@mui/material';
 
 const ModelSelector = () => {
-    const models = [
-        'MORTM 4omni - SAX',
-        'MORTM 4 arrange - SAX',
-        'MORTM 4 - PIANO'
-    ];
-    const [selectedModel, setSelectedModel] = React.useState(models[0]);
+    const [models, setModels] = useState([]);
+    const [selectedModel, setSelectedModel] = useState('');
+    const [modelDescriptions, setModelDescriptions] = useState({});
+
+    useEffect(() => {
+        fetch('https://8d4f2be12ab2.ngrok-free.app/model_info', {
+            method: 'POST',
+        })
+            .then(response => response.json())
+            .then(data => {
+                const modelNames = Object.values(data).map(model => model.model_name);
+                const descriptions = Object.values(data).reduce((acc, model) => {
+                    acc[model.model_name] = model.description;
+                    return acc;
+                }, {});
+                setModels(modelNames);
+                setModelDescriptions(descriptions);
+                if (modelNames.length > 0) {
+                    setSelectedModel(modelNames[0]);
+                }
+            })
+            .catch(error => console.error('Error fetching models:', error));
+    }, []);
 
     const handleChange = (event) => {
         setSelectedModel(event.target.value);
@@ -25,6 +42,11 @@ const ModelSelector = () => {
                     <MenuItem key={model} value={model}>{model}</MenuItem>
                 ))}
             </Select>
+            {selectedModel && (
+                <Typography variant="body2" sx={{ mt: 1 }}>
+                    {modelDescriptions[selectedModel]}
+                </Typography>
+            )}
         </FormControl>
     );
 };
