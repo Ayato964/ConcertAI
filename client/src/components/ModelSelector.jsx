@@ -1,59 +1,21 @@
 import React, { useState, useEffect } from 'react';
-import { Typography, Box, CircularProgress, Alert, Button, Drawer } from '@mui/material';
+import { Typography, Box, Button, Drawer } from '@mui/material';
+import { modelsData } from '../models.js';
 
 const ModelSelector = ({ selectedModel, setSelectedModel }) => {
-    const [models, setModels] = useState([]);
-    const [loading, setLoading] = useState(true);
-    const [error, setError] = useState(null);
+    const [models, setModels] = useState(modelsData);
     const [drawerOpen, setDrawerOpen] = useState(false);
 
     useEffect(() => {
-        const fetchModels = async () => {
-            try {
-                const response = await fetch('/api/model_info', {
-                    method: 'POST',
-                });
-                if (!response.ok) {
-                    throw new Error(`HTTP error! status: ${response.status}`);
-                }
-                const data = await response.json();
-                const modelData = Object.values(data);
-                setModels(modelData);
-                if (modelData.length > 0 && !selectedModel) {
-                    setSelectedModel(modelData[0].model_name);
-                }
-            } catch (e) {
-                setError(e.message);
-                console.error('Error fetching models:', e);
-            } finally {
-                setLoading(false);
-            }
-        };
-
-        fetchModels();
-    }, [selectedModel, setSelectedModel]);
+        if (models.length > 0 && !selectedModel) {
+            setSelectedModel(models[0].model_name);
+        }
+    }, [models, selectedModel, setSelectedModel]);
 
     const handleModelSelect = (modelName) => {
         setSelectedModel(modelName);
         setDrawerOpen(false);
     };
-
-    if (loading) {
-        return (
-            <Box display="flex" justifyContent="center" alignItems="center" minHeight="150px">
-                <CircularProgress />
-                <Typography ml={2}>Loading models...</Typography>
-            </Box>
-        );
-    }
-
-    if (error) {
-        return (
-            <Alert severity="error">
-                Failed to load models: {error}
-            </Alert>
-        );
-    }
 
     const selectedModelObject = models.find(m => m.model_name === selectedModel);
 
