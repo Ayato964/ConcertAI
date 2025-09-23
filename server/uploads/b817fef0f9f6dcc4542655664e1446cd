@@ -1,0 +1,11 @@
+{
+  "model_type": "MORTM4.1-SAX",
+  "program": [
+    0
+  ],
+  "tempo": 120,
+  "task": "MELODY_GEM",
+  "p": 0.95,
+  "split_measure": 99,
+  "num_gems": 3
+}

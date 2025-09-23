@@ -7,11 +7,14 @@ export default defineConfig({
   base: '/ConcertAI/',
   server: {
     proxy: {
-      '/api': {
+      '/generate': {
         target: 'https://8d4f2be12ab2.ngrok-free.app',
         changeOrigin: true,
-        rewrite: (path) => path.replace(/^\/api/, ''),
       },
-    },
-  },
+      '/model_info': {
+        target: 'https://8d4f2be12ab2.ngrok-free.app',
+        changeOrigin: true,
+      },
+    }
+  }
 })

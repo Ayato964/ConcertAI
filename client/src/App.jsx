@@ -1,6 +1,8 @@
 import React, { useState, useEffect, useRef, useMemo } from 'react';
-import { Container, CssBaseline, Box, ThemeProvider, createTheme, Grid, CircularProgress, Typography } from '@mui/material';
+import { Container, CssBaseline, Box, ThemeProvider, createTheme, Grid, CircularProgress, Typography, Snackbar, Alert } from '@mui/material';
 import * as Tone from 'tone';
+import { Midi } from '@tonejs/midi';
+import JSZip from 'jszip';
 import Header from './components/Header.jsx';
 import MidiInput from './components/MidiInput.jsx';
 import Settings from './components/Settings.jsx';
@@ -9,7 +11,18 @@ import Controls from './components/Controls.jsx';
 import PianoRoll from './components/PianoRoll.jsx';
 
 function App() {
-  const [mode, setMode] = useState('light');
+  const [mode, setMode] = useState('dark');
+  const [debugMode, setDebugMode] = useState(false);
+
+  useEffect(() => {
+    const urlParams = new URLSearchParams(window.location.search);
+    if (urlParams.get('debug') === 'true') {
+      const code = prompt('Enter debug code:');
+      if (code === '963964') {
+        setDebugMode(true);
+      }
+    }
+  }, []);
 
   const theme = useMemo(
     () =>
@@ -26,16 +39,46 @@ function App() {
   };
 
   const [midiData, setMidiData] = useState(null);
-  const [playbackState, setPlaybackState] = useState('stopped'); // 'stopped', 'playing', 'paused'
+  const [originalMidi, setOriginalMidi] = useState(null);
+  const [playbackState, setPlaybackState] = useState('stopped');
   const [progress, setProgress] = useState(0);
   const [samplerLoaded, setSamplerLoaded] = useState(false);
   const [generationLength, setGenerationLength] = useState(12);
   const [instrument, setInstrument] = useState('piano');
   const [tempo, setTempo] = useState(120);
   const [selectedModel, setSelectedModel] = useState('');
+  const [temperature, setTemperature] = useState(0.95);
+  const [p, setP] = useState(0.95);
+  const [numGems, setNumGems] = useState(3);
+
+  const [modelInfo, setModelInfo] = useState([]);
+  const [generatedMidis, setGeneratedMidis] = useState([]);
+  const [selectedGeneratedMidi, setSelectedGeneratedMidi] = useState(0);
+  const [notification, setNotification] = useState({ open: false, message: '', severity: 'info' });
+  const [isGenerating, setIsGenerating] = useState(false);
 
   const samplerRef = useRef(null);
   const scheduledEventsRef = useRef([]);
+  const pianoRollRef = useRef();
+
+  useEffect(() => {
+    const fetchModelInfo = async () => {
+      try {
+        const response = await fetch('/model_info', { method: 'POST' });
+        if (!response.ok) {
+          throw new Error(`Network response was not ok: ${response.statusText}`);
+        }
+        const data = await response.json();
+        const modelArray = Object.values(data);
+        setModelInfo(modelArray);
+      } catch (error) {
+        console.error('Failed to fetch model info:', error);
+        setNotification({ open: true, message: `Failed to load model list: ${error.message}`, severity: 'error' });
+      }
+    };
+
+    fetchModelInfo();
+  }, []);
 
   useEffect(() => {
     setSamplerLoaded(false);
@@ -54,12 +97,9 @@ function App() {
         },
         release: 1,
         baseUrl: 'https://tonejs.github.io/audio/salamander/',
-        onload: () => {
-          setSamplerLoaded(true);
-        }
+        onload: () => setSamplerLoaded(true)
       }).toDestination();
     } else if (instrument === 'saxophone') {
-      // Using FMSynth as a placeholder for saxophone
       samplerRef.current = new Tone.FMSynth().toDestination();
       setSamplerLoaded(true);
     }
@@ -67,21 +107,19 @@ function App() {
 
   useEffect(() => {
     if (midiData && samplerLoaded) {
-      // Clear any previously scheduled events
       scheduledEventsRef.current.forEach(id => Tone.Transport.clear(id));
       scheduledEventsRef.current = [];
 
       const notes = midiData.tracks.flatMap(track => track.notes);
       const scheduledEvents = notes.map(note =>
         Tone.Transport.schedule(time => {
-          if(samplerRef.current) {
+          if (samplerRef.current) {
             samplerRef.current.triggerAttackRelease(note.name, note.duration, time, note.velocity);
           }
         }, note.time)
       );
       scheduledEventsRef.current = scheduledEvents;
 
-      // Set transport loop for playback progress
       Tone.Transport.loop = true;
       Tone.Transport.loopStart = 0;
       Tone.Transport.loopEnd = midiData.duration;
@@ -97,6 +135,8 @@ function App() {
       handleStop();
     }
     setMidiData(newMidiData);
+    setOriginalMidi(newMidiData);
+    setGeneratedMidis([]);
     if (newMidiData.header.tempos.length > 0) {
       setTempo(Math.round(newMidiData.header.tempos[0].bpm));
     }
@@ -104,16 +144,8 @@ function App() {
 
   const handlePlay = async () => {
     if (!midiData || !samplerLoaded) return;
-
-    if (Tone.context.state !== 'running') {
-      await Tone.start();
-    }
-
-    if (playbackState === 'paused') {
-      Tone.Transport.start();
-    } else {
-      Tone.Transport.start();
-    }
+    if (Tone.context.state !== 'running') await Tone.start();
+    Tone.Transport.start();
     setPlaybackState('playing');
   };
 
@@ -134,17 +166,129 @@ function App() {
     setProgress(Tone.Transport.progress);
   };
 
+  const handleGenerate = async () => {
+    if (!selectedModel) {
+      setNotification({ open: true, message: "Please select a model from the Settings dropdown first.", severity: 'warning' });
+      return;
+    }
+    if (!originalMidi) {
+      setNotification({ open: true, message: "Please upload a MIDI file first.", severity: 'warning' });
+      return;
+    }
+
+    const notes = pianoRollRef.current.getSelectedNotes();
+    if (notes.length === 0) {
+      setNotification({ open: true, message: "ピアノロールで生成元の小節を選択してください。", severity: 'warning' });
+      return;
+    }
+
+    setIsGenerating(true);
+    setNotification({ open: true, message: "Generating... Please wait.", severity: 'info' });
+    setGeneratedMidis([]);
+
+    const midi = new Midi();
+    const track = midi.addTrack();
+    notes.forEach(note => {
+      track.addNote({ midi: note.midi, time: note.time, duration: note.duration, velocity: note.velocity });
+    });
+
+    const midiBlob = new Blob([midi.toArray()], { type: 'audio/midi' });
+    const meta = { model_type: selectedModel, program: [0], tempo: tempo, task: "MELODY_GEM", p: p, split_measure: 99, num_gems: numGems };
+    const metaBlob = new Blob([JSON.stringify(meta, null, 2)], { type: 'application/json' });
+
+    const formData = new FormData();
+    formData.append('midi', midiBlob, 'input.mid');
+    formData.append('meta_json', metaBlob, 'meta.json');
+
+    try {
+      const response = await fetch('/generate', { method: 'POST', body: formData });
+
+      if (response.ok) {
+        const blob = await response.blob();
+        const zip = await JSZip.loadAsync(blob);
+        const midiPromises = [];
+        const jsonPromises = [];
+
+        zip.forEach((relativePath, zipEntry) => {
+          if (zipEntry.name.endsWith('.mid')) {
+            midiPromises.push(zipEntry.async('arraybuffer').then(buffer => new Midi(buffer)));
+          } else if (zipEntry.name.endsWith('.json')) {
+            jsonPromises.push(zipEntry.async('string'));
+          }
+        });
+
+        const loadedMidis = await Promise.all(midiPromises);
+        const loadedJsons = await Promise.all(jsonPromises);
+
+        if (loadedJsons.length > 0) {
+          setNotification({ open: true, message: loadedJsons.join('\n'), severity: 'info' });
+        } else if (loadedMidis.length > 0) {
+          setGeneratedMidis(loadedMidis);
+          setSelectedGeneratedMidi(0);
+          setNotification({ open: true, message: `Successfully generated ${loadedMidis.length} MIDI file(s).`, severity: 'success' });
+        } else {
+          setNotification({ open: true, message: 'Generation complete, but no relevant files were produced.', severity: 'warning' });
+        }
+      } else {
+        const errorData = await response.json();
+        setNotification({ open: true, message: `Generation failed: ${errorData.detail || response.statusText}`, severity: 'error' });
+      }
+    } catch (error) {
+      console.error('Error during generation:', error);
+      setNotification({ open: true, message: `An error occurred: ${error.message}`, severity: 'error' });
+    } finally {
+      setIsGenerating(false);
+    }
+  };
+
+  useEffect(() => {
+    if (generatedMidis.length === 0 || !originalMidi || !modelInfo) {
+      if (originalMidi) setMidiData(originalMidi);
+      return;
+    }
+
+    const modelObject = modelInfo.find(model => model.model_name === selectedModel);
+    const modelType = modelObject?.tag?.model;
+
+    const generatedMidi = generatedMidis[selectedGeneratedMidi];
+
+    if (!modelType || !generatedMidi) return;
+
+    if (modelType === 'pretrained') {
+      setMidiData(generatedMidi);
+    } else if (modelType === 'sft') {
+      const newMidi = new Midi();
+      newMidi.header = originalMidi.header;
+
+      const promptNotes = pianoRollRef.current.getSelectedNotes();
+      const promptEndTime = promptNotes.reduce((max, note) => Math.max(max, note.time + note.duration), 0);
+
+      const track = newMidi.addTrack();
+
+      originalMidi.tracks.forEach(originalTrack => {
+        originalTrack.notes.forEach(note => {
+          if (note.time < promptEndTime) {
+            track.addNote(note);
+          }
+        });
+      });
+
+      generatedMidi.tracks.forEach(generatedTrack => {
+        generatedTrack.notes.forEach(note => {
+          track.addNote({ ...note, time: note.time + promptEndTime });
+        });
+      });
+      setMidiData(newMidi);
+    }
+  }, [generatedMidis, selectedGeneratedMidi, originalMidi, modelInfo, selectedModel]);
+
+
   useEffect(() => {
     if (playbackState === 'playing') {
       const id = Tone.Transport.scheduleRepeat(time => {
-        Tone.Draw.schedule(() => {
-          setProgress(Tone.Transport.progress);
-        }, time);
+        Tone.Draw.schedule(() => setProgress(Tone.Transport.progress), time);
       }, '16n');
-
-      return () => {
-        Tone.Transport.clear(id);
-      };
+      return () => Tone.Transport.clear(id);
     }
   }, [playbackState]);
 
@@ -152,19 +296,12 @@ function App() {
     const handleKeyDown = (event) => {
       if (event.code === 'Space') {
         event.preventDefault();
-        if (playbackState === 'playing') {
-          handlePause();
-        } else {
-          handlePlay();
-        }
+        if (playbackState === 'playing') handlePause();
+        else handlePlay();
       }
     };
-
     window.addEventListener('keydown', handleKeyDown);
-
-    return () => {
-      window.removeEventListener('keydown', handleKeyDown);
-    };
+    return () => window.removeEventListener('keydown', handleKeyDown);
   }, [playbackState, handlePlay, handlePause]);
 
   const duration = midiData ? midiData.duration : 0;
@@ -172,6 +309,20 @@ function App() {
   return (
     <ThemeProvider theme={theme}>
       <CssBaseline />
+      <Snackbar
+        open={notification.open}
+        autoHideDuration={isGenerating ? null : 6000}
+        onClose={() => setNotification({ ...notification, open: false })}
+        anchorOrigin={{ vertical: 'top', horizontal: 'right' }}
+      >
+        <Alert
+          onClose={() => setNotification({ ...notification, open: false })}
+          severity={notification.severity}
+          sx={{ width: '100%', whiteSpace: 'pre-wrap', wordBreak: 'break-all' }}
+        >
+          {notification.message}
+        </Alert>
+      </Snackbar>
       <Header toggleColorMode={toggleColorMode} mode={theme.palette.mode} />
       <Container maxWidth="xl" sx={{ my: 2 }}>
         {!samplerLoaded ? (
@@ -183,26 +334,41 @@ function App() {
           <Grid container spacing={4}>
             <Grid item xs={12} md={5}>
               <MidiInput onMidiUpload={handleMidiUpload} />
-              <Settings 
+              <Settings
                 instrument={instrument}
                 setInstrument={setInstrument}
                 tempo={tempo}
                 setTempo={setTempo}
                 selectedModel={selectedModel}
                 setSelectedModel={setSelectedModel}
+                modelInfo={modelInfo}
+                debugMode={debugMode}
               />
-              <AdvancedSettings />
+              <AdvancedSettings
+                temperature={temperature}
+                setTemperature={setTemperature}
+                p={p}
+                setP={setP}
+                numGems={numGems}
+                setNumGems={setNumGems}
+              />
               <Controls
                 onPlay={handlePlay}
                 onPause={handlePause}
                 onStop={handleStop}
+                onGenerate={handleGenerate}
+                isGenerating={isGenerating}
                 playbackState={playbackState}
                 progress={progress}
                 duration={duration}
+                generatedMidis={generatedMidis}
+                selectedGeneratedMidi={selectedGeneratedMidi}
+                onSelectedGeneratedMidiChange={setSelectedGeneratedMidi}
               />
             </Grid>
             <Grid item xs={12} md={7}>
               <PianoRoll
+                ref={pianoRollRef}
                 midiData={midiData}
                 progress={progress}
                 duration={duration}

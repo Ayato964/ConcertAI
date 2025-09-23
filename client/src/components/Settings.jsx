@@ -3,7 +3,7 @@ import { Accordion, AccordionSummary, AccordionDetails, Typography, FormControl,
 import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
 import ModelSelector from './ModelSelector';
 
-const Settings = ({ instrument, setInstrument, tempo, setTempo, selectedModel, setSelectedModel }) => {
+const Settings = ({ instrument, setInstrument, tempo, setTempo, selectedModel, setSelectedModel, modelInfo, debugMode }) => {
 
     const handleTempoChange = (e) => {
         const value = e.target.value;
@@ -19,7 +19,7 @@ const Settings = ({ instrument, setInstrument, tempo, setTempo, selectedModel, s
             </AccordionSummary>
             <AccordionDetails>
                 <Box>
-                    <ModelSelector selectedModel={selectedModel} setSelectedModel={setSelectedModel} />
+                    <ModelSelector selectedModel={selectedModel} setSelectedModel={setSelectedModel} modelInfo={modelInfo} debugMode={debugMode} />
                     <FormControl fullWidth margin="normal">
                         <InputLabel>Instrument</InputLabel>
                         <Select value={instrument} label="Instrument" onChange={(e) => setInstrument(e.target.value)}>

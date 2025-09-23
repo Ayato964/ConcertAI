@@ -1,4 +1,4 @@
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useRef, useEffect, useImperativeHandle, forwardRef } from 'react';
 import { Box, Typography, Slider } from '@mui/material';
 
 const MEASURE_HEADER_HEIGHT = 30;
@@ -35,7 +35,7 @@ const NoteBar = ({ note, pixelsPerSecond, verticalZoom }) => {
     );
 };
 
-const PianoRoll = ({ midiData, progress, duration, generationLength, setGenerationLength, onSeek }) => {
+const PianoRoll = forwardRef(({ midiData, progress, duration, generationLength, setGenerationLength, onSeek }, ref) => {
     const [selectedMeasures, setSelectedMeasures] = useState([0, 0]);
     const [horizontalZoom, setHorizontalZoom] = useState(1);
     const [verticalZoom, setVerticalZoom] = useState(1);
@@ -60,6 +60,23 @@ const PianoRoll = ({ midiData, progress, duration, generationLength, setGenerati
     const playbackIndicatorPosition = progress * totalDuration * pixelsPerSecond;
 
     const scrollContainerRef = useRef(null);
+
+    useImperativeHandle(ref, () => ({
+        getSelectedNotes: () => {
+            if (!midiData || (selectedMeasures[0] === 0 && selectedMeasures[1] === 0)) {
+                return [];
+            }
+
+            const startTime = selectedMeasures[0] * secondsPerMeasure;
+            const endTime = (selectedMeasures[1] + 1) * secondsPerMeasure;
+
+            const selectedNotes = allNotes.filter(note => {
+                return note.time >= startTime && note.time < endTime;
+            });
+
+            return selectedNotes;
+        }
+    }));
 
     useEffect(() => {
         const scrollContainer = scrollContainerRef.current;
@@ -193,7 +210,8 @@ const PianoRoll = ({ midiData, progress, duration, generationLength, setGenerati
                         height: `${contentHeight}px`,
                         position: 'relative',
                         cursor: 'pointer'
-                }}>
+                    }}
+                >
                     {Array.from({ length: totalMeasures }).map((_, i) => (
                         <Box
                             key={i}
@@ -248,6 +266,6 @@ const PianoRoll = ({ midiData, progress, duration, generationLength, setGenerati
             </Box>
         </Box>
     );
-};
+});
 
 export default PianoRoll;

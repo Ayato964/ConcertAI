@@ -1,23 +1,25 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { Typography, Box, Button, Drawer } from '@mui/material';
-import { modelsData } from '../models.js';
 
-const ModelSelector = ({ selectedModel, setSelectedModel }) => {
-    const [models, setModels] = useState(modelsData);
+const ModelSelector = ({ selectedModel, setSelectedModel, modelInfo, debugMode }) => {
     const [drawerOpen, setDrawerOpen] = useState(false);
+
+    const models = useMemo(() => modelInfo ? Object.values(modelInfo) : [], [modelInfo]);
 
     useEffect(() => {
         if (models.length > 0 && !selectedModel) {
             setSelectedModel(models[0].model_name);
         }
-    }, [models, selectedModel, setSelectedModel]);
+    }, [models, setSelectedModel]);
 
     const handleModelSelect = (modelName) => {
         setSelectedModel(modelName);
         setDrawerOpen(false);
     };
 
-    const selectedModelObject = models.find(m => m.model_name === selectedModel);
+    const selectedModelObject = useMemo(() => 
+        models.find(m => m.model_name === selectedModel)
+    , [models, selectedModel]);
 
     const modelList = (
         <Box sx={{ width: 350, p: 2 }}>
@@ -59,7 +61,24 @@ const ModelSelector = ({ selectedModel, setSelectedModel }) => {
 
     return (
         <Box sx={{ width: '100%', my: 2 }}>
-            {selectedModelObject && (
+            {debugMode &&
+                <Box sx={{ border: '1px dashed red', p: 1, mb: 2 }}>
+                    <Typography variant="caption">DEBUG INFO</Typography>
+                    <pre style={{ fontSize: '10px', whiteSpace: 'pre-wrap', wordBreak: 'break-all' }}>
+                        {
+        `modelInfo prop: ${JSON.stringify(modelInfo)}
+`+
+        `models array (internal): ${JSON.stringify(models.map(m=>m.model_name))}
+`+
+        `selectedModel prop: ${selectedModel}
+`+
+        `selectedModelObject (internal): ${selectedModelObject ? selectedModelObject.model_name : 'undefined'}`
+                        }
+                    </pre>
+                </Box>
+            }
+
+            {selectedModelObject ? (
                  <Box>
                     <Typography variant="overline" color="text.secondary">Model</Typography>
                     <Button
@@ -91,6 +110,8 @@ const ModelSelector = ({ selectedModel, setSelectedModel }) => {
                         </Typography>
                     </Button>
                 </Box>
+            ) : (
+                <Typography>Loading models...</Typography>
             )}
 
             <Drawer

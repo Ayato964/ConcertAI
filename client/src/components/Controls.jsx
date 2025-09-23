@@ -1,10 +1,22 @@
 import React from 'react';
-import { Box, Button, IconButton, Slider, Typography } from '@mui/material';
+import { Box, Button, IconButton, Slider, Typography, CircularProgress, FormControl, InputLabel, Select, MenuItem } from '@mui/material';
 import PlayArrowIcon from '@mui/icons-material/PlayArrow';
 import PauseIcon from '@mui/icons-material/Pause';
 import StopIcon from '@mui/icons-material/Stop';
 
-const Controls = ({ onPlay, onPause, onStop, playbackState, progress, duration }) => {
+const Controls = ({ 
+    onPlay, 
+    onPause, 
+    onStop, 
+    onGenerate, 
+    isGenerating, 
+    playbackState, 
+    progress, 
+    duration, 
+    generatedMidis, 
+    selectedGeneratedMidi, 
+    onSelectedGeneratedMidiChange 
+}) => {
     return (
         <Box sx={{ my: 2 }}>
             <Box
@@ -27,10 +39,26 @@ const Controls = ({ onPlay, onPause, onStop, playbackState, progress, duration }
                 <Button
                     variant="contained"
                     color="secondary"
-                    sx={{ flexGrow: { xs: 1, sm: 0 } }}
+                    onClick={onGenerate}
+                    disabled={isGenerating}
+                    sx={{ flexGrow: { xs: 1, sm: 0 }, position: 'relative' }}
                 >
-                    Generate
+                    {isGenerating ? <CircularProgress size={24} sx={{ position: 'absolute'}} /> : 'Generate'}
                 </Button>
+                {generatedMidis.length > 1 && (
+                    <FormControl size="small" sx={{ minWidth: 120 }}>
+                        <InputLabel>Generated</InputLabel>
+                        <Select
+                            value={selectedGeneratedMidi}
+                            label="Generated"
+                            onChange={(e) => onSelectedGeneratedMidiChange(e.target.value)}
+                        >
+                            {generatedMidis.map((_, index) => (
+                                <MenuItem key={index} value={index}>Variation {index + 1}</MenuItem>
+                            ))}
+                        </Select>
+                    </FormControl>
+                )}
             </Box>
             <Box sx={{ mt: 2 }}>
                 <Typography gutterBottom>Playback Progress</Typography>
