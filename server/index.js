@@ -83,7 +83,7 @@ const modelInfo = {
   }
 };
 
-app.post('/model_info', (req, res) => {
+app.get('/model_info', (req, res) => {
   res.json(modelInfo);
 });
 

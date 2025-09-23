@@ -10,6 +10,10 @@ import AdvancedSettings from './components/AdvancedSettings.jsx';
 import Controls from './components/Controls.jsx';
 import PianoRoll from './components/PianoRoll.jsx';
 
+const API_BASE_URL = import.meta.env.PROD
+  ? 'https://8d4f2be12ab2.ngrok-free.app'
+  : '';
+
 function App() {
   const [mode, setMode] = useState('dark');
   const [debugMode, setDebugMode] = useState(false);
@@ -64,7 +68,7 @@ function App() {
   useEffect(() => {
     const fetchModelInfo = async () => {
       try {
-        const response = await fetch('/model_info', { method: 'POST' });
+        const response = await fetch(`${API_BASE_URL}/model_info`, { method: 'POST' });
         if (!response.ok) {
           throw new Error(`Network response was not ok: ${response.statusText}`);
         }
@@ -201,7 +205,7 @@ function App() {
     formData.append('meta_json', metaBlob, 'meta.json');
 
     try {
-      const response = await fetch('/generate', { method: 'POST', body: formData });
+      const response = await fetch(`${API_BASE_URL}/generate`, { method: 'POST', body: formData });
 
       if (response.ok) {
         const blob = await response.blob();
