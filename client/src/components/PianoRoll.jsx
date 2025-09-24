@@ -1,5 +1,6 @@
 import React, { useState, useRef, useEffect, useImperativeHandle, forwardRef } from 'react';
 import { Box, Typography, Slider } from '@mui/material';
+import ChordProgression from './ChordProgression';
 
 const MEASURE_HEADER_HEIGHT = 30;
 
@@ -39,6 +40,7 @@ const PianoRoll = forwardRef(({ midiData, progress, duration, generationLength, 
     const [selectedMeasures, setSelectedMeasures] = useState([0, 0]);
     const [horizontalZoom, setHorizontalZoom] = useState(1);
     const [verticalZoom, setVerticalZoom] = useState(1);
+    const [chords, setChords] = useState({});
 
     const pixelsPerSecond = 80 * horizontalZoom;
     const NOTE_HEIGHT = 20 * verticalZoom;
@@ -202,6 +204,11 @@ const PianoRoll = forwardRef(({ midiData, progress, duration, generationLength, 
                         </Box>
                     ))}
                 </Box>
+                <ChordProgression 
+                    totalMeasures={totalMeasures} 
+                    pixelsPerMeasure={pixelsPerMeasure} 
+                    onChordsChange={setChords} 
+                />
 
                 <Box 
                     onClick={handleContainerClick}
