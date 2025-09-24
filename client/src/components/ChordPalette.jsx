@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Dialog, DialogTitle, DialogContent, DialogActions, Button, Select, MenuItem, InputLabel, FormControl, Grid } from '@mui/material';
+import { Dialog, DialogTitle, DialogContent, DialogActions, Button, Box, Typography, ToggleButton, ToggleButtonGroup } from '@mui/material';
 import { roots, qualities, bases } from '../chordData';
 
 const ChordPalette = ({ open, onClose, onSave, chord }) => {
@@ -8,12 +8,12 @@ const ChordPalette = ({ open, onClose, onSave, chord }) => {
     const [selectedBase, setSelectedBase] = useState('None');
 
     useEffect(() => {
-        if (chord) {
-            setSelectedRoot(chord.root || 'C');
-            setSelectedQuality(chord.quality || 'None');
-            setSelectedBase(chord.base || 'None');
+        if (open) { // Reset state when dialog opens
+            setSelectedRoot(chord?.root || 'C');
+            setSelectedQuality(chord?.quality || 'None');
+            setSelectedBase(chord?.base || 'None');
         }
-    }, [chord]);
+    }, [open, chord]);
 
     const handleSave = () => {
         onSave({
@@ -24,42 +24,64 @@ const ChordPalette = ({ open, onClose, onSave, chord }) => {
         onClose();
     };
 
+    const getChordText = () => {
+        const quality = selectedQuality === 'None' ? '' : selectedQuality;
+        const base = selectedBase === 'None' ? '' : selectedBase;
+        return `${selectedRoot}${quality}${base}`;
+    };
+
+    const handleRootChange = (event, newRoot) => {
+        if (newRoot !== null) {
+            setSelectedRoot(newRoot);
+        }
+    };
+
+    const handleQualityChange = (event, newQuality) => {
+        if (newQuality !== null) {
+            setSelectedQuality(newQuality);
+        }
+    };
+
+    const handleBaseChange = (event, newBase) => {
+        if (newBase !== null) {
+            setSelectedBase(newBase);
+        }
+    };
+
+    const renderToggleButtons = (items, selectedValue, onChange) => (
+        <ToggleButtonGroup
+            value={selectedValue}
+            exclusive
+            onChange={onChange}
+            sx={{ flexWrap: 'wrap', justifyContent: 'center', gap: 1, mb: 2 }}
+        >
+            {items.map(item => (
+                <ToggleButton key={item} value={item} sx={{ textTransform: 'none' }}>
+                    {item}
+                </ToggleButton>
+            ))}
+        </ToggleButtonGroup>
+    );
+
     return (
-        <Dialog open={open} onClose={onClose} maxWidth="sm" fullWidth>
-            <DialogTitle>Select Chord</DialogTitle>
+        <Dialog open={open} onClose={onClose} maxWidth="md" fullWidth>
+            <DialogTitle sx={{ textAlign: 'center' }}>Select Chord</DialogTitle>
             <DialogContent>
-                <Grid container spacing={2} sx={{ mt: 1 }}>
-                    <Grid item xs={4}>
-                        <FormControl fullWidth>
-                            <InputLabel>Root</InputLabel>
-                            <Select value={selectedRoot} onChange={(e) => setSelectedRoot(e.target.value)}>
-                                {roots.map(root => (
-                                    <MenuItem key={root} value={root}>{root}</MenuItem>
-                                ))}
-                            </Select>
-                        </FormControl>
-                    </Grid>
-                    <Grid item xs={4}>
-                        <FormControl fullWidth>
-                            <InputLabel>Quality</InputLabel>
-                            <Select value={selectedQuality} onChange={(e) => setSelectedQuality(e.target.value)}>
-                                {qualities.map(quality => (
-                                    <MenuItem key={quality} value={quality}>{quality}</MenuItem>
-                                ))}
-                            </Select>
-                        </FormControl>
-                    </Grid>
-                    <Grid item xs={4}>
-                        <FormControl fullWidth>
-                            <InputLabel>Base</InputLabel>
-                            <Select value={selectedBase} onChange={(e) => setSelectedBase(e.target.value)}>
-                                {bases.map(base => (
-                                    <MenuItem key={base} value={base}>{base}</MenuItem>
-                                ))}
-                            </Select>
-                        </FormControl>
-                    </Grid>
-                </Grid>
+                <Box sx={{ my: 2, p: 2, border: '1px solid', borderColor: 'divider', borderRadius: 1, textAlign: 'center' }}>
+                    <Typography variant="h4">
+                        {getChordText()}
+                    </Typography>
+                </Box>
+
+                <Typography variant="h6" sx={{ mt: 2 }}>Roots</Typography>
+                {renderToggleButtons(roots, selectedRoot, handleRootChange)}
+
+                <Typography variant="h6" sx={{ mt: 2 }}>Qualities</Typography>
+                {renderToggleButtons(qualities, selectedQuality, handleQualityChange)}
+
+                <Typography variant="h6" sx={{ mt: 2 }}>Bases</Typography>
+                {renderToggleButtons(bases, selectedBase, handleBaseChange)}
+
             </DialogContent>
             <DialogActions>
                 <Button onClick={onClose}>Cancel</Button>
