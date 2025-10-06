@@ -36,11 +36,17 @@ const NoteBar = ({ note, pixelsPerSecond, verticalZoom }) => {
     );
 };
 
-const PianoRoll = forwardRef(({ midiData, progress, duration, generationLength, setGenerationLength, onSeek }, ref) => {
+const PianoRoll = forwardRef(({ midiData, progress, duration, generationLength, setGenerationLength, onSeek, onChordsChange }, ref) => {
     const [selectedMeasures, setSelectedMeasures] = useState([0, 0]);
     const [horizontalZoom, setHorizontalZoom] = useState(1);
     const [verticalZoom, setVerticalZoom] = useState(1);
     const [chords, setChords] = useState({});
+
+    useEffect(() => {
+        if (onChordsChange) {
+            onChordsChange(chords);
+        }
+    }, [chords, onChordsChange]);
 
     const pixelsPerSecond = 80 * horizontalZoom;
     const NOTE_HEIGHT = 20 * verticalZoom;

@@ -60,6 +60,8 @@ function App() {
   const [selectedGeneratedMidi, setSelectedGeneratedMidi] = useState(0);
   const [notification, setNotification] = useState({ open: false, message: '', severity: 'info' });
   const [isGenerating, setIsGenerating] = useState(false);
+  const [chords, setChords] = useState({});
+  const [debugInfo, setDebugInfo] = useState(null);
 
   const samplerRef = useRef(null);
   const scheduledEventsRef = useRef([]);
@@ -170,6 +172,13 @@ function App() {
     setProgress(Tone.Transport.progress);
   };
 
+  const getChordText = (chord) => {
+    if (!chord) return '';
+    const quality = chord.quality === 'None' ? '' : chord.quality;
+    const base = chord.base === 'None' ? '' : chord.base;
+    return `${chord.root}${quality}${base}`;
+  }
+
   const handleGenerate = async () => {
     if (!selectedModel) {
       setNotification({ open: true, message: "Please select a model from the Settings dropdown first.", severity: 'warning' });
@@ -197,7 +206,37 @@ function App() {
     });
 
     const midiBlob = new Blob([midi.toArray()], { type: 'audio/midi' });
+
+    const modelObject = modelInfo.find(model => model.model_name === selectedModel);
+    const modelType = modelObject?.tag?.model;
+
     const meta = { model_type: selectedModel, program: [0], tempo: tempo, task: "MELODY_GEM", p: p, split_measure: 99, num_gems: numGems };
+
+    if (modelType === 'sft' && originalMidi) {
+        const promptEndTime = notes.reduce((max, note) => Math.max(max, note.time + note.duration), 0);
+
+        const bpm = originalMidi?.header.tempos[0]?.bpm || 120;
+        const timeSignature = originalMidi?.header.timeSignatures[0]?.timeSignature || [4, 4];
+        const beatsPerMeasure = timeSignature[0];
+        const secondsPerBeat = 60 / bpm;
+        const secondsPerMeasure = secondsPerBeat * beatsPerMeasure;
+
+        const allChordTimings = Object.entries(chords).map(([key, value]) => {
+            const [measure, beat] = key.split('-').map(Number);
+            const startTime = (measure * secondsPerMeasure) + (beat * secondsPerBeat);
+            return { chord: value, startTime };
+        });
+
+        const subsequentChords = allChordTimings.filter(c => c.startTime >= promptEndTime);
+
+        meta.chord_item = subsequentChords.map(c => getChordText(c.chord));
+        meta.chord_times = subsequentChords.map(c => c.startTime - promptEndTime);
+    }
+
+    if (debugMode) {
+      setDebugInfo({ meta });
+    }
+
     const metaBlob = new Blob([JSON.stringify(meta, null, 2)], { type: 'application/json' });
 
     const formData = new FormData();
@@ -379,9 +418,18 @@ function App() {
                 generationLength={generationLength}
                 setGenerationLength={setGenerationLength}
                 onSeek={handleSeek}
+                onChordsChange={setChords}
               />
             </Grid>
           </Grid>
+        )}
+        {debugMode && debugInfo && (
+          <Box sx={{ mt: 4, p: 2, border: '1px dashed grey', background: 'rgba(255,255,255,0.05)' }}>
+            <Typography variant="h6">Debug Information</Typography>
+            <pre style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-all' }}>
+              {JSON.stringify(debugInfo, null, 2)}
+            </pre>
+          </Box>
         )}
       </Container>
     </ThemeProvider>

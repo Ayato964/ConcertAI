@@ -9,7 +9,7 @@ const Header = ({ toggleColorMode, mode }) => {
         <AppBar position="static">
             <Toolbar>
                 <Typography variant="h6" component="div" sx={{ flexGrow: 1 }}>
-                    ConcertAI HUB ver.1.8
+                    ConcertAI HUB ver.1.9
                 </Typography>
                 <Box sx={{ flexGrow: 1, display: 'flex', justifyContent: 'center' }}>
                 </Box>
