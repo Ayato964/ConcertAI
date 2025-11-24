@@ -1,9 +1,9 @@
-import React from 'react';
-import { Accordion, AccordionSummary, AccordionDetails, Typography, FormControl, InputLabel, Select, MenuItem, Box, TextField } from '@mui/material';
-import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
+import React, { useState } from 'react';
+import { ChevronDown, ChevronUp, Settings as SettingsIcon } from 'lucide-react';
 import ModelSelector from './ModelSelector';
 
 const Settings = ({ instrument, setInstrument, tempo, setTempo, selectedModel, setSelectedModel, modelInfo, debugMode }) => {
+    const [isOpen, setIsOpen] = useState(true);
 
     const handleTempoChange = (e) => {
         const value = e.target.value;
@@ -13,32 +13,52 @@ const Settings = ({ instrument, setInstrument, tempo, setTempo, selectedModel, s
     };
 
     return (
-        <Accordion defaultExpanded sx={{ my: 2 }}>
-            <AccordionSummary expandIcon={<ExpandMoreIcon />}>
-                <Typography>Settings</Typography>
-            </AccordionSummary>
-            <AccordionDetails>
-                <Box>
+        <div className="border border-border rounded-xl overflow-hidden bg-surface/30">
+            <button
+                onClick={() => setIsOpen(!isOpen)}
+                className="w-full px-4 py-3 flex items-center justify-between bg-surface/50 hover:bg-surface transition-colors"
+            >
+                <div className="flex items-center gap-2 font-medium">
+                    <SettingsIcon className="w-4 h-4 text-primary" />
+                    <span>Basic Settings</span>
+                </div>
+                {isOpen ? <ChevronUp className="w-4 h-4 text-muted" /> : <ChevronDown className="w-4 h-4 text-muted" />}
+            </button>
+
+            {isOpen && (
+                <div className="p-4 space-y-4 border-t border-border">
                     <ModelSelector selectedModel={selectedModel} setSelectedModel={setSelectedModel} modelInfo={modelInfo} debugMode={debugMode} />
-                    <FormControl fullWidth margin="normal">
-                        <InputLabel>Instrument</InputLabel>
-                        <Select value={instrument} label="Instrument" onChange={(e) => setInstrument(e.target.value)}>
-                            <MenuItem value="piano">Piano</MenuItem>
-                            <MenuItem value="saxophone">Saxophone</MenuItem>
-                        </Select>
-                    </FormControl>
-                    <FormControl fullWidth margin="normal">
-                        <TextField
-                            label="Tempo (BPM)"
-                            type="number"
-                            value={tempo}
-                            onChange={handleTempoChange}
-                            inputProps={{ min: 0 }}
-                        />
-                    </FormControl>
-                </Box>
-            </AccordionDetails>
-        </Accordion>
+
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        <div className="space-y-1.5">
+                            <label className="text-sm font-medium text-muted">Instrument</label>
+                            <div className="relative">
+                                <select
+                                    value={instrument}
+                                    onChange={(e) => setInstrument(e.target.value)}
+                                    className="input-field appearance-none cursor-pointer"
+                                >
+                                    <option value="piano">Piano</option>
+                                    <option value="saxophone">Saxophone</option>
+                                </select>
+                                <ChevronDown className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted pointer-events-none" />
+                            </div>
+                        </div>
+
+                        <div className="space-y-1.5">
+                            <label className="text-sm font-medium text-muted">Tempo (BPM)</label>
+                            <input
+                                type="number"
+                                value={tempo}
+                                onChange={handleTempoChange}
+                                min="0"
+                                className="input-field"
+                            />
+                        </div>
+                    </div>
+                </div>
+            )}
+        </div>
     );
 };
 

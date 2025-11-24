@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
-import { Dialog, DialogTitle, DialogContent, DialogActions, Button, Box, Typography, ToggleButton, ToggleButtonGroup } from '@mui/material';
 import { roots, qualities, bases } from '../chordData';
+import { X } from 'lucide-react';
 
 const ChordPalette = ({ open, onClose, onSave, chord }) => {
     const [selectedRoot, setSelectedRoot] = useState('C');
@@ -30,64 +30,80 @@ const ChordPalette = ({ open, onClose, onSave, chord }) => {
         return `${selectedRoot}${quality}${base}`;
     };
 
-    const handleRootChange = (event, newRoot) => {
-        if (newRoot !== null) {
-            setSelectedRoot(newRoot);
-        }
-    };
+    if (!open) return null;
 
-    const handleQualityChange = (event, newQuality) => {
-        if (newQuality !== null) {
-            setSelectedQuality(newQuality);
-        }
-    };
-
-    const handleBaseChange = (event, newBase) => {
-        if (newBase !== null) {
-            setSelectedBase(newBase);
-        }
-    };
-
-    const renderToggleButtons = (items, selectedValue, onChange) => (
-        <ToggleButtonGroup
-            value={selectedValue}
-            exclusive
-            onChange={onChange}
-            sx={{ flexWrap: 'wrap', justifyContent: 'center', gap: 1, mb: 2 }}
-        >
+    const ToggleGroup = ({ items, selected, onChange }) => (
+        <div className="flex flex-wrap justify-center gap-2 mb-4">
             {items.map(item => (
-                <ToggleButton key={item} value={item} sx={{ textTransform: 'none' }}>
+                <button
+                    key={item}
+                    onClick={() => onChange(item)}
+                    className={`px-3 py-1.5 rounded-md text-sm font-medium transition-all duration-200 ${selected === item
+                            ? 'bg-primary text-white shadow-lg shadow-primary/25'
+                            : 'bg-surface border border-border text-text hover:bg-surface/80 hover:border-primary/50'
+                        }`}
+                >
                     {item}
-                </ToggleButton>
+                </button>
             ))}
-        </ToggleButtonGroup>
+        </div>
     );
 
     return (
-        <Dialog open={open} onClose={onClose} maxWidth="md" fullWidth>
-            <DialogTitle sx={{ textAlign: 'center' }}>Select Chord</DialogTitle>
-            <DialogContent>
-                <Box sx={{ my: 2, p: 2, border: '1px solid', borderColor: 'divider', borderRadius: 1, textAlign: 'center' }}>
-                    <Typography variant="h4">
-                        {getChordText()}
-                    </Typography>
-                </Box>
+        <div className="fixed inset-0 z-[100] flex items-center justify-center p-4">
+            <div
+                className="absolute inset-0 bg-black/60 backdrop-blur-sm animate-in fade-in duration-200"
+                onClick={onClose}
+            />
+            <div className="relative w-full max-w-2xl bg-background border border-border rounded-xl shadow-2xl overflow-hidden animate-in zoom-in-95 duration-200 max-h-[90vh] flex flex-col">
+                <div className="p-4 border-b border-border flex items-center justify-between bg-surface/30">
+                    <h2 className="text-xl font-bold">Select Chord</h2>
+                    <button onClick={onClose} className="p-2 hover:bg-surface rounded-full transition-colors">
+                        <X className="w-5 h-5" />
+                    </button>
+                </div>
 
-                <Typography variant="h6" sx={{ mt: 2 }}>Roots</Typography>
-                {renderToggleButtons(roots, selectedRoot, handleRootChange)}
+                <div className="p-6 overflow-y-auto">
+                    <div className="mb-6 p-4 bg-surface border border-border rounded-lg text-center">
+                        <div className="text-4xl font-bold text-primary">
+                            {getChordText()}
+                        </div>
+                    </div>
 
-                <Typography variant="h6" sx={{ mt: 2 }}>Qualities</Typography>
-                {renderToggleButtons(qualities, selectedQuality, handleQualityChange)}
+                    <div className="space-y-6">
+                        <div>
+                            <h3 className="text-sm font-medium text-muted uppercase tracking-wider mb-3 text-center">Roots</h3>
+                            <ToggleGroup items={roots} selected={selectedRoot} onChange={setSelectedRoot} />
+                        </div>
 
-                <Typography variant="h6" sx={{ mt: 2 }}>Bases</Typography>
-                {renderToggleButtons(bases, selectedBase, handleBaseChange)}
+                        <div>
+                            <h3 className="text-sm font-medium text-muted uppercase tracking-wider mb-3 text-center">Qualities</h3>
+                            <ToggleGroup items={qualities} selected={selectedQuality} onChange={setSelectedQuality} />
+                        </div>
 
-            </DialogContent>
-            <DialogActions>
-                <Button onClick={onClose}>Cancel</Button>
-                <Button onClick={handleSave}>Save</Button>
-            </DialogActions>
-        </Dialog>
+                        <div>
+                            <h3 className="text-sm font-medium text-muted uppercase tracking-wider mb-3 text-center">Bases</h3>
+                            <ToggleGroup items={bases} selected={selectedBase} onChange={setSelectedBase} />
+                        </div>
+                    </div>
+                </div>
+
+                <div className="p-4 border-t border-border bg-surface/30 flex justify-end gap-3">
+                    <button
+                        onClick={onClose}
+                        className="btn-secondary"
+                    >
+                        Cancel
+                    </button>
+                    <button
+                        onClick={handleSave}
+                        className="btn-primary"
+                    >
+                        Save Chord
+                    </button>
+                </div>
+            </div>
+        </div>
     );
 };
 

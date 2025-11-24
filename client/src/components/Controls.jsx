@@ -1,76 +1,86 @@
 import React from 'react';
-import { Box, Button, IconButton, Slider, Typography, CircularProgress, FormControl, InputLabel, Select, MenuItem } from '@mui/material';
-import PlayArrowIcon from '@mui/icons-material/PlayArrow';
-import PauseIcon from '@mui/icons-material/Pause';
-import StopIcon from '@mui/icons-material/Stop';
+import { Play, Pause, Square, Loader2, ChevronDown } from 'lucide-react';
 
-const Controls = ({ 
-    onPlay, 
-    onPause, 
-    onStop, 
-    onGenerate, 
-    isGenerating, 
-    playbackState, 
-    progress, 
-    duration, 
-    generatedMidis, 
-    selectedGeneratedMidi, 
-    onSelectedGeneratedMidiChange 
+const Controls = ({
+    onPlay,
+    onPause,
+    onStop,
+    onGenerate,
+    isGenerating,
+    playbackState,
+    progress,
+    duration,
+    generatedMidis,
+    selectedGeneratedMidi,
+    onSelectedGeneratedMidiChange
 }) => {
     return (
-        <Box sx={{ my: 2 }}>
-            <Box
-                sx={{
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: 1,
-                    flexWrap: 'wrap',
-                }}
-            >
-                <IconButton color="primary" onClick={onPlay} disabled={playbackState === 'playing'}>
-                    <PlayArrowIcon />
-                </IconButton>
-                <IconButton color="primary" onClick={onPause} disabled={playbackState !== 'playing'}>
-                    <PauseIcon />
-                </IconButton>
-                <IconButton onClick={onStop} disabled={playbackState === 'stopped'}>
-                    <StopIcon />
-                </IconButton>
-                <Button
-                    variant="contained"
-                    color="secondary"
+        <div className="space-y-6">
+            <div className="flex items-center gap-4 flex-wrap">
+                <div className="flex items-center gap-2 bg-surface border border-border rounded-lg p-1">
+                    <button
+                        onClick={onPlay}
+                        disabled={playbackState === 'playing'}
+                        className={`p-2 rounded-md transition-colors ${playbackState === 'playing' ? 'text-primary bg-primary/10' : 'text-text hover:bg-white/5 disabled:opacity-50 disabled:cursor-not-allowed'}`}
+                        title="Play"
+                    >
+                        <Play className="w-5 h-5 fill-current" />
+                    </button>
+                    <button
+                        onClick={onPause}
+                        disabled={playbackState !== 'playing'}
+                        className={`p-2 rounded-md transition-colors ${playbackState === 'paused' ? 'text-primary bg-primary/10' : 'text-text hover:bg-white/5 disabled:opacity-50 disabled:cursor-not-allowed'}`}
+                        title="Pause"
+                    >
+                        <Pause className="w-5 h-5 fill-current" />
+                    </button>
+                    <button
+                        onClick={onStop}
+                        disabled={playbackState === 'stopped'}
+                        className="p-2 rounded-md transition-colors text-text hover:bg-white/5 disabled:opacity-50 disabled:cursor-not-allowed"
+                        title="Stop"
+                    >
+                        <Square className="w-5 h-5 fill-current" />
+                    </button>
+                </div>
+
+                <button
                     onClick={onGenerate}
                     disabled={isGenerating}
-                    sx={{ flexGrow: { xs: 1, sm: 0 }, position: 'relative' }}
+                    className="btn-primary flex items-center gap-2 min-w-[120px] justify-center"
                 >
-                    {isGenerating ? <CircularProgress size={24} sx={{ position: 'absolute'}} /> : 'Generate'}
-                </Button>
+                    {isGenerating ? <Loader2 className="w-5 h-5 animate-spin" /> : 'Generate'}
+                </button>
+
                 {generatedMidis.length > 1 && (
-                    <FormControl size="small" sx={{ minWidth: 120 }}>
-                        <InputLabel>Generated</InputLabel>
-                        <Select
+                    <div className="relative min-w-[160px]">
+                        <select
                             value={selectedGeneratedMidi}
-                            label="Generated"
-                            onChange={(e) => onSelectedGeneratedMidiChange(e.target.value)}
+                            onChange={(e) => onSelectedGeneratedMidiChange(Number(e.target.value))}
+                            className="input-field appearance-none cursor-pointer"
                         >
                             {generatedMidis.map((_, index) => (
-                                <MenuItem key={index} value={index}>Variation {index + 1}</MenuItem>
+                                <option key={index} value={index}>Variation {index + 1}</option>
                             ))}
-                        </Select>
-                    </FormControl>
+                        </select>
+                        <ChevronDown className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted pointer-events-none" />
+                    </div>
                 )}
-            </Box>
-            <Box sx={{ mt: 2 }}>
-                <Typography gutterBottom>Playback Progress</Typography>
-                <Slider
-                    value={progress}
-                    max={1}
-                    step={0.001}
-                    aria-labelledby="playback-progress-slider"
-                    disabled
-                />
-            </Box>
-        </Box>
+            </div>
+
+            <div className="space-y-2">
+                <div className="flex justify-between text-xs text-muted font-medium uppercase tracking-wider">
+                    <span>Playback Progress</span>
+                    <span>{Math.floor(progress * 100)}%</span>
+                </div>
+                <div className="relative h-2 bg-surface border border-border rounded-full overflow-hidden">
+                    <div
+                        className="absolute top-0 left-0 h-full bg-primary transition-all duration-100 ease-linear"
+                        style={{ width: `${progress * 100}%` }}
+                    />
+                </div>
+            </div>
+        </div>
     );
 };
 

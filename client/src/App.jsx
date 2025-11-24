@@ -1,8 +1,8 @@
 import React, { useState, useEffect, useRef, useMemo } from 'react';
-import { Container, CssBaseline, Box, ThemeProvider, createTheme, Grid, CircularProgress, Typography, Snackbar, Alert } from '@mui/material';
 import * as Tone from 'tone';
 import { Midi } from '@tonejs/midi';
 import JSZip from 'jszip';
+import { Loader2, AlertCircle, CheckCircle2, Info } from 'lucide-react';
 import Header from './components/Header.jsx';
 import MidiInput from './components/MidiInput.jsx';
 import Settings from './components/Settings.jsx';
@@ -15,7 +15,6 @@ const API_BASE_URL = import.meta.env.PROD
   : '';
 
 function App() {
-  const [mode, setMode] = useState('dark');
   const [debugMode, setDebugMode] = useState(false);
 
   useEffect(() => {
@@ -27,20 +26,6 @@ function App() {
       }
     }
   }, []);
-
-  const theme = useMemo(
-    () =>
-      createTheme({
-        palette: {
-          mode,
-        },
-      }),
-    [mode],
-  );
-
-  const toggleColorMode = () => {
-    setMode((prevMode) => (prevMode === 'light' ? 'dark' : 'light'));
-  };
 
   const [midiData, setMidiData] = useState(null);
   const [originalMidi, setOriginalMidi] = useState(null);
@@ -210,27 +195,27 @@ function App() {
     const modelObject = modelInfo.find(model => model.model_name === selectedModel);
     const modelType = modelObject?.tag?.model;
 
-    const meta = { model_type: selectedModel, program: [0], tempo: tempo, task: "MELODY_GEM", p: p, split_measure: 99, num_gems: numGems };
+    const meta = { model_type: selectedModel, program: [0], tempo: tempo, task: "MELODY_GEM", p: p, temperature: temperature, split_measure: 99, num_gems: numGems };
 
     if (modelType === 'sft' && originalMidi) {
-        const promptEndTime = notes.reduce((max, note) => Math.max(max, note.time + note.duration), 0);
+      const promptEndTime = notes.reduce((max, note) => Math.max(max, note.time + note.duration), 0);
 
-        const bpm = originalMidi?.header.tempos[0]?.bpm || 120;
-        const timeSignature = originalMidi?.header.timeSignatures[0]?.timeSignature || [4, 4];
-        const beatsPerMeasure = timeSignature[0];
-        const secondsPerBeat = 60 / bpm;
-        const secondsPerMeasure = secondsPerBeat * beatsPerMeasure;
+      const bpm = originalMidi?.header.tempos[0]?.bpm || 120;
+      const timeSignature = originalMidi?.header.timeSignatures[0]?.timeSignature || [4, 4];
+      const beatsPerMeasure = timeSignature[0];
+      const secondsPerBeat = 60 / bpm;
+      const secondsPerMeasure = secondsPerBeat * beatsPerMeasure;
 
-        const allChordTimings = Object.entries(chords).map(([key, value]) => {
-            const [measure, beat] = key.split('-').map(Number);
-            const startTime = (measure * secondsPerMeasure) + (beat * secondsPerBeat);
-            return { chord: value, startTime };
-        });
+      const allChordTimings = Object.entries(chords).map(([key, value]) => {
+        const [measure, beat] = key.split('-').map(Number);
+        const startTime = (measure * secondsPerMeasure) + (beat * secondsPerBeat);
+        return { chord: value, startTime };
+      });
 
-        const subsequentChords = allChordTimings.filter(c => c.startTime >= promptEndTime);
+      const subsequentChords = allChordTimings.filter(c => c.startTime >= promptEndTime);
 
-        meta.chord_item = subsequentChords.map(c => getChordText(c.chord));
-        meta.chord_times = subsequentChords.map(c => c.startTime - promptEndTime);
+      meta.chord_item = subsequentChords.map(c => getChordText(c.chord));
+      meta.chord_times = subsequentChords.map(c => c.startTime - promptEndTime);
     }
 
     if (debugMode) {
@@ -350,89 +335,105 @@ function App() {
   const duration = midiData ? midiData.duration : 0;
 
   return (
-    <ThemeProvider theme={theme}>
-      <CssBaseline />
-      <Snackbar
-        open={notification.open}
-        autoHideDuration={isGenerating ? null : 6000}
-        onClose={() => setNotification({ ...notification, open: false })}
-        anchorOrigin={{ vertical: 'top', horizontal: 'right' }}
-      >
-        <Alert
-          onClose={() => setNotification({ ...notification, open: false })}
-          severity={notification.severity}
-          sx={{ width: '100%', whiteSpace: 'pre-wrap', wordBreak: 'break-all' }}
-        >
-          {notification.message}
-        </Alert>
-      </Snackbar>
-      <Header toggleColorMode={toggleColorMode} mode={theme.palette.mode} />
-      <Container maxWidth="xl" sx={{ my: 2 }}>
+    <div className="h-screen bg-background text-text flex flex-col overflow-hidden">
+      {/* Toast Notification */}
+      {notification.open && (
+        <div className={`fixed top-4 right-4 z-[100] p-4 rounded-lg shadow-lg border flex items-start gap-3 max-w-md animate-in slide-in-from-right-5 fade-in duration-300 ${notification.severity === 'error' ? 'bg-red-900/90 border-red-700 text-red-100' :
+            notification.severity === 'warning' ? 'bg-yellow-900/90 border-yellow-700 text-yellow-100' :
+              notification.severity === 'success' ? 'bg-green-900/90 border-green-700 text-green-100' :
+                'bg-blue-900/90 border-blue-700 text-blue-100'
+          }`}>
+          {notification.severity === 'error' && <AlertCircle className="w-5 h-5 shrink-0" />}
+          {notification.severity === 'warning' && <AlertCircle className="w-5 h-5 shrink-0" />}
+          {notification.severity === 'success' && <CheckCircle2 className="w-5 h-5 shrink-0" />}
+          {notification.severity === 'info' && <Info className="w-5 h-5 shrink-0" />}
+          <div className="flex-1 text-sm whitespace-pre-wrap break-all">{notification.message}</div>
+          <button
+            onClick={() => setNotification({ ...notification, open: false })}
+            className="text-white/70 hover:text-white"
+          >
+            ×
+          </button>
+        </div>
+      )}
+
+      <Header />
+
+      <main className="flex-1 container mx-auto px-4 pb-4 max-w-[1600px] overflow-hidden">
         {!samplerLoaded ? (
-          <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '80vh' }}>
-            <CircularProgress />
-            <Typography sx={{ ml: 2 }}>Loading Samples...</Typography>
-          </Box>
+          <div className="flex flex-col justify-center items-center h-full gap-4">
+            <Loader2 className="w-12 h-12 animate-spin text-primary" />
+            <p className="text-xl text-muted">Loading Samples...</p>
+          </div>
         ) : (
-          <Grid container spacing={4}>
-            <Grid item xs={12} md={5}>
-              <MidiInput onMidiUpload={handleMidiUpload} />
-              <Settings
-                instrument={instrument}
-                setInstrument={setInstrument}
-                tempo={tempo}
-                setTempo={setTempo}
-                selectedModel={selectedModel}
-                setSelectedModel={setSelectedModel}
-                modelInfo={modelInfo}
-                debugMode={debugMode}
-              />
-              <AdvancedSettings
-                temperature={temperature}
-                setTemperature={setTemperature}
-                p={p}
-                setP={setP}
-                numGems={numGems}
-                setNumGems={setNumGems}
-              />
-              <Controls
-                onPlay={handlePlay}
-                onPause={handlePause}
-                onStop={handleStop}
-                onGenerate={handleGenerate}
-                isGenerating={isGenerating}
-                playbackState={playbackState}
-                progress={progress}
-                duration={duration}
-                generatedMidis={generatedMidis}
-                selectedGeneratedMidi={selectedGeneratedMidi}
-                onSelectedGeneratedMidiChange={setSelectedGeneratedMidi}
-              />
-            </Grid>
-            <Grid item xs={12} md={7}>
-              <PianoRoll
-                ref={pianoRollRef}
-                midiData={midiData}
-                progress={progress}
-                duration={duration}
-                generationLength={generationLength}
-                setGenerationLength={setGenerationLength}
-                onSeek={handleSeek}
-                onChordsChange={setChords}
-              />
-            </Grid>
-          </Grid>
+          <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 h-full">
+            <div className="lg:col-span-4 space-y-6 overflow-y-auto pr-2 pb-2">
+              <div className="card space-y-6">
+                <MidiInput onMidiUpload={handleMidiUpload} />
+                <Settings
+                  instrument={instrument}
+                  setInstrument={setInstrument}
+                  tempo={tempo}
+                  setTempo={setTempo}
+                  selectedModel={selectedModel}
+                  setSelectedModel={setSelectedModel}
+                  modelInfo={modelInfo}
+                  debugMode={debugMode}
+                />
+                <AdvancedSettings
+                  temperature={temperature}
+                  setTemperature={setTemperature}
+                  p={p}
+                  setP={setP}
+                  numGems={numGems}
+                  setNumGems={setNumGems}
+                />
+              </div>
+
+              <div className="card">
+                <Controls
+                  onPlay={handlePlay}
+                  onPause={handlePause}
+                  onStop={handleStop}
+                  onGenerate={handleGenerate}
+                  isGenerating={isGenerating}
+                  playbackState={playbackState}
+                  progress={progress}
+                  duration={duration}
+                  generatedMidis={generatedMidis}
+                  selectedGeneratedMidi={selectedGeneratedMidi}
+                  onSelectedGeneratedMidiChange={setSelectedGeneratedMidi}
+                />
+              </div>
+
+              {debugMode && debugInfo && (
+                <div className="p-4 border border-dashed border-border bg-surface/30 rounded-lg">
+                  <h6 className="text-lg font-semibold mb-2">Debug Information</h6>
+                  <pre className="whitespace-pre-wrap break-all text-xs font-mono text-muted">
+                    {JSON.stringify(debugInfo, null, 2)}
+                  </pre>
+                </div>
+              )}
+            </div>
+
+            <div className="lg:col-span-8 h-full flex flex-col min-h-[400px]">
+              <div className="card h-full flex flex-col p-0 overflow-hidden">
+                <PianoRoll
+                  ref={pianoRollRef}
+                  midiData={midiData}
+                  progress={progress}
+                  duration={duration}
+                  generationLength={generationLength}
+                  setGenerationLength={setGenerationLength}
+                  onSeek={handleSeek}
+                  onChordsChange={setChords}
+                />
+              </div>
+            </div>
+          </div>
         )}
-        {debugMode && debugInfo && (
-          <Box sx={{ mt: 4, p: 2, border: '1px dashed grey', background: 'rgba(255,255,255,0.05)' }}>
-            <Typography variant="h6">Debug Information</Typography>
-            <pre style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-all' }}>
-              {JSON.stringify(debugInfo, null, 2)}
-            </pre>
-          </Box>
-        )}
-      </Container>
-    </ThemeProvider>
+      </main>
+    </div>
   );
 }
 

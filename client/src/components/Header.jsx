@@ -1,26 +1,25 @@
 import React from 'react';
-import { AppBar, Toolbar, Typography, Box, IconButton } from '@mui/material';
-import Brightness4Icon from '@mui/icons-material/Brightness4';
-import Brightness7Icon from '@mui/icons-material/Brightness7';
+import { Music } from 'lucide-react';
 import ShortcutGuide from './ShortcutGuide';
 
-const Header = ({ toggleColorMode, mode }) => {
+const Header = () => {
     return (
-        <AppBar position="static">
-            <Toolbar>
-                <Typography variant="h6" component="div" sx={{ flexGrow: 1 }}>
-                    ConcertAI HUB ver.1.9
-                </Typography>
-                <Box sx={{ flexGrow: 1, display: 'flex', justifyContent: 'center' }}>
-                </Box>
-                <Box sx={{ flexGrow: 1, display: 'flex', justifyContent: 'flex-end', alignItems: 'center' }}>
+        <header className="glass-header mb-8">
+            <div className="container mx-auto px-4 h-16 flex items-center justify-between">
+                <div className="flex items-center gap-3">
+                    <div className="p-2 bg-primary/10 rounded-lg">
+                        <Music className="w-6 h-6 text-primary" />
+                    </div>
+                    <h1 className="text-xl font-bold bg-gradient-to-r from-primary to-accent bg-clip-text text-transparent">
+                        ConcertAI HUB <span className="text-sm font-medium text-muted ml-2">ver.2.0</span>
+                    </h1>
+                </div>
+
+                <div className="flex items-center gap-4">
                     <ShortcutGuide />
-                    <IconButton onClick={toggleColorMode} color="inherit">
-                        {mode === 'dark' ? <Brightness7Icon /> : <Brightness4Icon />}
-                    </IconButton>
-                </Box>
-            </Toolbar>
-        </AppBar>
+                </div>
+            </div>
+        </header>
     );
 };
 

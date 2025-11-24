@@ -1,5 +1,4 @@
 import React, { useState, useRef, useEffect, useImperativeHandle, forwardRef } from 'react';
-import { Box, Typography, Slider } from '@mui/material';
 import ChordProgression from './ChordProgression';
 
 const MEASURE_HEADER_HEIGHT = 30;
@@ -11,28 +10,21 @@ const NoteBar = ({ note, pixelsPerSecond, verticalZoom }) => {
     const width = note.duration * pixelsPerSecond;
 
     return (
-        <Box
-            sx={{
-                position: 'absolute',
+        <div
+            className="absolute bg-primary rounded-sm z-10 flex items-center justify-center overflow-hidden shadow-sm border border-white/10"
+            style={{
                 top: `${top}px`,
                 left: `${left}px`,
                 width: `${width}px`,
                 height: `${NOTE_HEIGHT - 1}px`,
-                backgroundColor: 'primary.main',
-                borderRadius: '2px',
-                zIndex: 3,
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                overflow: 'hidden',
             }}
         >
             {width > 20 && (
-                <Typography variant="caption" sx={{ color: 'white', userSelect: 'none' }}>
+                <span className="text-[10px] text-white font-medium select-none truncate px-1">
                     {note.name}
-                </Typography>
+                </span>
             )}
-        </Box>
+        </div>
     );
 };
 
@@ -154,130 +146,119 @@ const PianoRoll = forwardRef(({ midiData, progress, duration, generationLength, 
     };
 
     return (
-        <Box>
-            <Box sx={{ display: 'flex', gap: 2, mb: 1 }}>
-                <Typography>H-Zoom</Typography>
-                <Slider
-                    min={0.1}
-                    max={5}
-                    step={0.1}
-                    value={horizontalZoom}
-                    onChange={(e, newValue) => setHorizontalZoom(newValue)}
-                />
-                <Typography>V-Zoom</Typography>
-                <Slider
-                    min={0.1}
-                    max={5}
-                    step={0.1}
-                    value={verticalZoom}
-                    onChange={(e, newValue) => setVerticalZoom(newValue)}
-                />
-            </Box>
-            <Box
-                sx={{
-                    my: 2,
-                    border: '1px solid lightgrey',
-                    borderRadius: '4px',
-                    height: '500px',
-                    overflow: 'auto',
-                    position: 'relative',
-                    backgroundColor: 'background.paper',
-                }}
+        <div className="flex flex-col h-full p-4">
+            <div className="flex items-center gap-6 mb-4">
+                <div className="flex items-center gap-3">
+                    <span className="text-sm font-medium text-muted">H-Zoom</span>
+                    <input
+                        type="range"
+                        min="0.1"
+                        max="5"
+                        step="0.1"
+                        value={horizontalZoom}
+                        onChange={(e) => setHorizontalZoom(parseFloat(e.target.value))}
+                        className="w-32 h-2 bg-surface rounded-lg appearance-none cursor-pointer accent-primary"
+                    />
+                </div>
+                <div className="flex items-center gap-3">
+                    <span className="text-sm font-medium text-muted">V-Zoom</span>
+                    <input
+                        type="range"
+                        min="0.1"
+                        max="5"
+                        step="0.1"
+                        value={verticalZoom}
+                        onChange={(e) => setVerticalZoom(parseFloat(e.target.value))}
+                        className="w-32 h-2 bg-surface rounded-lg appearance-none cursor-pointer accent-primary"
+                    />
+                </div>
+            </div>
+
+            <div
+                className="flex-1 border border-border rounded-lg overflow-auto relative bg-surface/20"
                 ref={scrollContainerRef}
             >
                 {/* Sticky Measure Header */}
-                <Box sx={{
-                    position: 'sticky',
-                    top: 0,
-                    left: 0,
-                    width: `${contentWidth}px`,
-                    height: `${MEASURE_HEADER_HEIGHT}px`,
-                    display: 'flex',
-                    backgroundColor: 'background.default',
-                    zIndex: 5
-                }}>
-                    {Array.from({ length: totalMeasures }).map((_, i) => (
-                        <Box key={i} sx={{
-                            width: `${pixelsPerMeasure}px`,
-                            borderRight: '1px solid grey',
-                            textAlign: 'center',
-                            color: 'text.secondary',
-                            backgroundColor: i >= selectedMeasures[0] && i <= selectedMeasures[1] ? 'rgba(0, 128, 255, 0.3)' : 'transparent',
-                            cursor: 'pointer',
-                        }}
-                        onClick={() => handleMeasureClick(i)}>
-                            {i + 1}
-                        </Box>
-                    ))}
-                </Box>
-                <ChordProgression 
-                    totalMeasures={totalMeasures} 
-                    pixelsPerMeasure={pixelsPerMeasure} 
-                    onChordsChange={setChords} 
-                />
-
-                <Box 
-                    onClick={handleContainerClick}
-                    sx={{
+                <div
+                    className="sticky top-0 left-0 flex bg-background z-20 border-b border-border"
+                    style={{
                         width: `${contentWidth}px`,
-                        height: `${contentHeight}px`,
-                        position: 'relative',
-                        cursor: 'pointer'
+                        height: `${MEASURE_HEADER_HEIGHT}px`,
                     }}
                 >
                     {Array.from({ length: totalMeasures }).map((_, i) => (
-                        <Box
+                        <div
                             key={i}
-                            sx={{
-                                position: 'absolute',
+                            className={`
+                                border-r border-border text-xs flex items-center justify-center cursor-pointer transition-colors
+                                ${i >= selectedMeasures[0] && i <= selectedMeasures[1] ? 'bg-primary/30 text-primary font-bold' : 'text-muted hover:bg-surface'}
+                            `}
+                            style={{ width: `${pixelsPerMeasure}px` }}
+                            onClick={() => handleMeasureClick(i)}
+                        >
+                            {i + 1}
+                        </div>
+                    ))}
+                </div>
+
+                <ChordProgression
+                    totalMeasures={totalMeasures}
+                    pixelsPerMeasure={pixelsPerMeasure}
+                    onChordsChange={setChords}
+                />
+
+                <div
+                    onClick={handleContainerClick}
+                    className="relative cursor-pointer"
+                    style={{
+                        width: `${contentWidth}px`,
+                        height: `${contentHeight}px`,
+                    }}
+                >
+                    {/* Grid Background */}
+                    {Array.from({ length: totalMeasures }).map((_, i) => (
+                        <div
+                            key={i}
+                            className={`absolute top-0 h-full border-r border-border/30 ${i < generationLength ? 'bg-primary/5' : ''}`}
+                            style={{
                                 left: `${i * pixelsPerMeasure}px`,
-                                top: 0,
                                 width: `${pixelsPerMeasure}px`,
-                                height: '100%',
-                                backgroundColor: i < generationLength ? 'rgba(0, 128, 255, 0.1)' : 'transparent',
-                                borderRight: '1px solid grey', // Darker divider
-                                zIndex: 1,
                             }}
                         />
                     ))}
+
+                    {/* Selection Overlay */}
                     {selectedMeasures[0] !== 0 || selectedMeasures[1] !== 0 ? (
-                        <Box
-                            sx={{
-                                position: 'absolute',
+                        <div
+                            className="absolute top-0 h-full bg-primary/20 pointer-events-none z-[2]"
+                            style={{
                                 left: `${selectedMeasures[0] * pixelsPerMeasure}px`,
-                                top: 0,
                                 width: `${(selectedMeasures[1] - selectedMeasures[0] + 1) * pixelsPerMeasure}px`,
-                                height: '100%',
-                                backgroundColor: 'rgba(0, 128, 255, 0.3)',
-                                zIndex: 2,
-                                pointerEvents: 'none',
                             }}
                         />
                     ) : null}
+
+                    {/* Notes */}
                     {allNotes.map((note, index) => (
                         <NoteBar key={index} note={note} pixelsPerSecond={pixelsPerSecond} verticalZoom={verticalZoom} />
                     ))}
-                    <Box
-                        sx={{
-                            position: 'absolute',
+
+                    {/* Playback Head */}
+                    <div
+                        className="absolute top-0 h-full w-0.5 bg-red-500 z-20 pointer-events-none shadow-[0_0_10px_rgba(239,68,68,0.5)]"
+                        style={{
                             left: `${playbackIndicatorPosition}px`,
-                            top: 0,
-                            height: '100%',
-                            width: '2px',
-                            backgroundColor: 'red',
-                            zIndex: 4,
-                            pointerEvents: 'none',
                         }}
                     />
-                </Box>
+                </div>
 
                 {!midiData && (
-                    <Typography color="text.secondary" sx={{ position: 'absolute', top: '50%', left: '50%', transform: 'translate(-50%, -50%)' }}>
+                    <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 text-muted pointer-events-none">
                         Piano Roll Area
-                    </Typography>
+                    </div>
                 )}
-            </Box>
-        </Box>
+            </div>
+        </div>
     );
 });
 

@@ -1,5 +1,4 @@
 import React, { useState } from 'react';
-import { Box, Typography } from '@mui/material';
 import ChordPalette from './ChordPalette';
 
 const CHORD_AREA_HEIGHT = 50;
@@ -35,55 +34,46 @@ const ChordProgression = ({ totalMeasures, pixelsPerMeasure, onChordsChange }) =
     }
 
     return (
-        <Box>
-            <Box sx={{
-                width: `${totalMeasures * pixelsPerMeasure}px`,
-                height: `${CHORD_AREA_HEIGHT}px`,
-                display: 'flex',
-                position: 'relative',
-                backgroundColor: 'background.default',
-                borderBottom: '1px solid grey',
-            }}>
+        <div>
+            <div
+                className="flex relative bg-background border-b border-border"
+                style={{
+                    width: `${totalMeasures * pixelsPerMeasure}px`,
+                    height: `${CHORD_AREA_HEIGHT}px`,
+                }}
+            >
                 {Array.from({ length: totalMeasures }).map((_, measureIndex) => (
-                    <Box key={measureIndex} sx={{
-                        width: `${pixelsPerMeasure}px`,
-                        height: '100%',
-                        borderRight: '1px solid grey',
-                        display: 'flex',
-                    }}>
+                    <div
+                        key={measureIndex}
+                        className="h-full border-r border-border flex"
+                        style={{ width: `${pixelsPerMeasure}px` }}
+                    >
                         {Array.from({ length: 4 }).map((_, beatIndex) => (
-                            <Box
+                            <div
                                 key={beatIndex}
                                 onDoubleClick={() => handleDoubleClick(measureIndex, beatIndex)}
-                                sx={{
-                                    width: `${pixelsPerMeasure / 4}px`,
-                                    height: '100%',
-                                    borderRight: beatIndex < 3 ? '1px dotted lightgrey' : 'none',
-                                    cursor: 'pointer',
-                                    display: 'flex',
-                                    alignItems: 'center',
-                                    justifyContent: 'center',
-                                    backgroundColor: chords[`${measureIndex}-${beatIndex}`] ? 'action.hover' : 'transparent',
-                                    '&:hover': {
-                                        backgroundColor: 'action.selected'
-                                    }
-                                }}
+                                className={`
+                                    h-full flex items-center justify-center cursor-pointer transition-colors
+                                    ${beatIndex < 3 ? 'border-r border-border/30 border-dashed' : ''}
+                                    ${chords[`${measureIndex}-${beatIndex}`] ? 'bg-primary/20 hover:bg-primary/30' : 'hover:bg-surface'}
+                                `}
+                                style={{ width: `${pixelsPerMeasure / 4}px` }}
                             >
-                                <Typography variant="caption">
+                                <span className="text-xs font-medium text-text select-none">
                                     {getChordText(chords[`${measureIndex}-${beatIndex}`])}
-                                </Typography>
-                            </Box>
+                                </span>
+                            </div>
                         ))}
-                    </Box>
+                    </div>
                 ))}
-            </Box>
+            </div>
             <ChordPalette
                 open={paletteOpen}
                 onClose={handlePaletteClose}
                 onSave={handlePaletteSave}
                 chord={chords[selectedChordIndex]}
             />
-        </Box>
+        </div>
     );
 };
 
