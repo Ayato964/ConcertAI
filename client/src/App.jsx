@@ -11,7 +11,7 @@ import Controls from './components/Controls.jsx';
 import PianoRoll from './components/PianoRoll.jsx';
 
 const API_BASE_URL = import.meta.env.PROD
-  ? 'https://8d4f2be12ab2.ngrok-free.app'
+  ? import.meta.env.VITE_API_BASE_URL
   : '';
 
 function App() {
@@ -339,9 +339,9 @@ function App() {
       {/* Toast Notification */}
       {notification.open && (
         <div className={`fixed top-4 right-4 z-[100] p-4 rounded-lg shadow-lg border flex items-start gap-3 max-w-md animate-in slide-in-from-right-5 fade-in duration-300 ${notification.severity === 'error' ? 'bg-red-900/90 border-red-700 text-red-100' :
-            notification.severity === 'warning' ? 'bg-yellow-900/90 border-yellow-700 text-yellow-100' :
-              notification.severity === 'success' ? 'bg-green-900/90 border-green-700 text-green-100' :
-                'bg-blue-900/90 border-blue-700 text-blue-100'
+          notification.severity === 'warning' ? 'bg-yellow-900/90 border-yellow-700 text-yellow-100' :
+            notification.severity === 'success' ? 'bg-green-900/90 border-green-700 text-green-100' :
+              'bg-blue-900/90 border-blue-700 text-blue-100'
           }`}>
           {notification.severity === 'error' && <AlertCircle className="w-5 h-5 shrink-0" />}
           {notification.severity === 'warning' && <AlertCircle className="w-5 h-5 shrink-0" />}
