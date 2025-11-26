@@ -3,12 +3,14 @@ import * as Tone from 'tone';
 import { Midi } from '@tonejs/midi';
 import JSZip from 'jszip';
 import { Loader2, AlertCircle, CheckCircle2, Info } from 'lucide-react';
+import Soundfont from 'soundfont-player';
 import Header from './components/Header.jsx';
 import MidiInput from './components/MidiInput.jsx';
 import Settings from './components/Settings.jsx';
 import AdvancedSettings from './components/AdvancedSettings.jsx';
 import Controls from './components/Controls.jsx';
 import PianoRoll from './components/PianoRoll.jsx';
+import { GM_INSTRUMENTS } from './constants/instrumentNames';
 
 const API_BASE_URL = import.meta.env.PROD
   ? import.meta.env.VITE_API_BASE_URL
@@ -47,8 +49,9 @@ function App() {
   const [isGenerating, setIsGenerating] = useState(false);
   const [chords, setChords] = useState({});
   const [debugInfo, setDebugInfo] = useState(null);
+  const [trackMutes, setTrackMutes] = useState({});
+  const [trackSolos, setTrackSolos] = useState({});
 
-  const samplerRef = useRef(null);
   const scheduledEventsRef = useRef([]);
   const pianoRollRef = useRef();
 
@@ -71,51 +74,193 @@ function App() {
     fetchModelInfo();
   }, []);
 
+  const [instruments, setInstruments] = useState([]);
+
   useEffect(() => {
+    console.log('Instrument loading effect running');
     setSamplerLoaded(false);
-    if (samplerRef.current) {
-      samplerRef.current.dispose();
+
+    // Dispose old instruments and gains
+    instruments.forEach(inst => {
+      if (inst.type === 'tone') {
+        inst.player.dispose();
+      }
+      // Native gains don't have dispose, just disconnect
+      if (inst.gain) {
+        inst.gain.disconnect();
+      }
+    });
+
+    if (!midiData) {
+      console.log('No midiData, resetting instruments');
+      setInstruments([]);
+      setSamplerLoaded(true);
+      return;
     }
 
-    if (instrument === 'piano') {
-      samplerRef.current = new Tone.Sampler({
-        urls: {
-          A0: 'A0.mp3', C1: 'C1.mp3', 'D#1': 'Ds1.mp3', 'F#1': 'Fs1.mp3', A1: 'A1.mp3',
-          C2: 'C2.mp3', 'D#2': 'Ds2.mp3', 'F#2': 'Fs2.mp3', A2: 'A2.mp3', C3: 'C3.mp3',
-          'D#3': 'Ds3.mp3', 'F#3': 'Fs3.mp3', A3: 'A3.mp3', C4: 'C4.mp3', 'D#4': 'Ds4.mp3',
-          'F#4': 'Fs4.mp3', A4: 'A4.mp3', C5: 'C5.mp3', 'D#5': 'Ds5.mp3', 'F#5': 'Fs5.mp3',
-          A5: 'A5.mp3', C6: 'C6.mp3',
-        },
-        release: 1,
-        baseUrl: 'https://tonejs.github.io/audio/salamander/',
-        onload: () => setSamplerLoaded(true)
-      }).toDestination();
-    } else if (instrument === 'saxophone') {
-      samplerRef.current = new Tone.FMSynth().toDestination();
-      setSamplerLoaded(true);
-    }
-  }, [instrument]);
+    const loadInstruments = async () => {
+      const promises = midiData.tracks.map(async (track, i) => {
+        const program = track.instrument.number;
+        const isDrum = track.instrument.percussion || track.channel === 9;
+
+        // Create a native Gain node for volume control
+        const gainNode = Tone.context.createGain();
+        Tone.connect(gainNode, Tone.Destination);
+
+        let player;
+        let type;
+
+        console.log(`Loading track ${i}: Program ${program}, Drum: ${isDrum}`);
+
+        if (isDrum) {
+          type = 'tone';
+          console.log('Loading Salamander Drumkit...');
+          player = new Tone.Sampler({
+            urls: {
+              35: "kick_OH_FF_1.wav",
+              36: "kick2_OH_FF_1.wav",
+              37: "snareStick_OH_F_1.wav",
+              38: "snare_OH_FF_1.wav",
+              40: "snare2_OH_FF_1.wav",
+              41: "loTom_OH_FF_1.wav",
+              42: "hihatClosed_OH_F_1.wav",
+              43: "loTom_OH_FF_6.wav",
+              44: "hihatFoot_OH_MP_1.wav",
+              45: "hiTom_OH_FF_1.wav",
+              46: "hihatOpen_OH_FF_1.wav",
+              47: "hiTom_OH_FF_1.wav",
+              48: "hiTom_OH_FF_4.wav",
+              49: "crash1_OH_FF_1.wav",
+              50: "hiTom_OH_FF_8.wav",
+              51: "ride1_OH_FF_1.wav",
+              52: "china1_OH_FF_1.wav",
+              53: "ride1Bell_OH_F_1.wav",
+              55: "splash1_OH_F_1.wav",
+              57: "crash2_OH_FF_1.wav",
+              59: "ride2_OH_FF_1.wav",
+            },
+            baseUrl: "drums/OH/",
+            onload: () => {
+              console.log('Salamander Drumkit loaded!');
+            }
+          });
+          player.connect(gainNode);
+          // Tone.Sampler is async but we want to wait for it?
+          // Actually Tone.loaded() waits for all buffers.
+          await Tone.loaded();
+        } else if (program >= 0 && program <= 7) {
+          type = 'tone';
+          player = new Tone.Sampler({
+            urls: {
+              A0: 'A0.mp3', C1: 'C1.mp3', 'D#1': 'Ds1.mp3', 'F#1': 'Fs1.mp3', A1: 'A1.mp3',
+              C2: 'C2.mp3', 'D#2': 'Ds2.mp3', 'F#2': 'Fs2.mp3', A2: 'A2.mp3', C3: 'C3.mp3',
+              'D#3': 'Ds3.mp3', 'F#3': 'Fs3.mp3', A3: 'A3.mp3', C4: 'C4.mp3', 'D#4': 'Ds4.mp3',
+              'F#4': 'Fs4.mp3', A4: 'A4.mp3', C5: 'C5.mp3', 'D#5': 'Ds5.mp3', 'F#5': 'Fs5.mp3',
+              A5: 'A5.mp3', C6: 'C6.mp3',
+            },
+            release: 1,
+            baseUrl: 'https://tonejs.github.io/audio/salamander/',
+          });
+          player.connect(gainNode);
+          await Tone.loaded();
+        } else {
+          type = 'soundfont';
+          const instrumentName = GM_INSTRUMENTS[program] || 'acoustic_grand_piano';
+          console.log(`Fetching Soundfont: ${instrumentName}`);
+          try {
+            player = await Soundfont.instrument(Tone.context.rawContext, instrumentName, {
+              destination: gainNode,
+              soundfont: 'FluidR3_GM'
+            });
+          } catch (e) {
+            console.error(`Failed to load soundfont ${instrumentName}, falling back to synth`, e);
+            type = 'tone';
+            player = new Tone.PolySynth(Tone.Synth);
+            player.connect(gainNode);
+          }
+        }
+
+        return { player, gain: gainNode, type };
+      });
+
+      try {
+        const loadedInstruments = await Promise.all(promises);
+        console.log('All instruments loaded');
+        setInstruments(loadedInstruments);
+        setSamplerLoaded(true);
+      } catch (error) {
+        console.error('Error loading instruments:', error);
+        setSamplerLoaded(true); // Proceed anyway?
+      }
+    };
+
+    loadInstruments();
+
+    return () => {
+      // Cleanup function (handled at start of effect)
+    };
+  }, [midiData]);
+
+  // Sync Mutes/Solos with Instruments
+  useEffect(() => {
+    const isSoloActive = Object.values(trackSolos).some(s => s);
+    instruments.forEach((inst, index) => {
+      if (inst && inst.gain) {
+        let shouldPlay = true;
+        if (isSoloActive) {
+          shouldPlay = trackSolos[index];
+        } else {
+          shouldPlay = !trackMutes[index];
+        }
+        inst.gain.gain.value = shouldPlay ? 1 : 0;
+      }
+    });
+  }, [trackMutes, trackSolos, instruments]);
 
   useEffect(() => {
-    if (midiData && samplerLoaded) {
+    console.log('Scheduling effect running', {
+      midiData: !!midiData,
+      samplerLoaded,
+      instrumentsLength: instruments.length,
+      tracksLength: midiData?.tracks.length
+    });
+
+    if (midiData && samplerLoaded && instruments.length === midiData.tracks.length) {
+      console.log('Starting scheduling...');
       scheduledEventsRef.current.forEach(id => Tone.Transport.clear(id));
       scheduledEventsRef.current = [];
 
-      const notes = midiData.tracks.flatMap(track => track.notes);
-      const scheduledEvents = notes.map(note =>
-        Tone.Transport.schedule(time => {
-          if (samplerRef.current) {
-            samplerRef.current.triggerAttackRelease(note.name, note.duration, time, note.velocity);
-          }
-        }, note.time)
-      );
-      scheduledEventsRef.current = scheduledEvents;
+      const newScheduledEvents = [];
+
+      midiData.tracks.forEach((track, index) => {
+        const instObj = instruments[index];
+        if (instObj) {
+          track.notes.forEach(note => {
+            const eventId = Tone.Transport.schedule(time => {
+              if (instObj.type === 'tone') {
+                instObj.player.triggerAttackRelease(note.name, note.duration, time, note.velocity);
+              } else if (instObj.type === 'soundfont') {
+                // soundfont-player play method: play(note, time, { duration, gain })
+                // Note: time is AudioContext time. Tone.Transport.schedule passes AudioContext time.
+                instObj.player.play(note.name, time, {
+                  duration: note.duration,
+                  gain: note.velocity
+                });
+              }
+            }, note.time);
+            newScheduledEvents.push(eventId);
+          });
+        }
+      });
+
+      console.log(`Scheduled ${newScheduledEvents.length} events`);
+      scheduledEventsRef.current = newScheduledEvents;
 
       Tone.Transport.loop = true;
       Tone.Transport.loopStart = 0;
       Tone.Transport.loopEnd = midiData.duration;
     }
-  }, [midiData, samplerLoaded]);
+  }, [midiData, samplerLoaded, instruments]);
 
   useEffect(() => {
     Tone.Transport.bpm.value = tempo;
@@ -125,6 +270,7 @@ function App() {
     if (playbackState !== 'stopped') {
       handleStop();
     }
+    setTrackMutes({}); // Reset mutes
     setMidiData(newMidiData);
     setOriginalMidi(newMidiData);
     setGeneratedMidis([]);
@@ -134,6 +280,7 @@ function App() {
   };
 
   const handlePlay = async () => {
+    console.log('handlePlay called', { midiData: !!midiData, samplerLoaded });
     if (!midiData || !samplerLoaded) return;
     if (Tone.context.state !== 'running') await Tone.start();
     Tone.Transport.start();
@@ -293,7 +440,9 @@ function App() {
 
       const track = newMidi.addTrack();
 
-      originalMidi.tracks.forEach(originalTrack => {
+      originalMidi.tracks.forEach((originalTrack, index) => {
+        if (trackMutes[index]) return; // Skip muted tracks in generation prompt
+
         originalTrack.notes.forEach(note => {
           if (note.time < promptEndTime) {
             track.addNote(note);
@@ -308,7 +457,7 @@ function App() {
       });
       setMidiData(newMidi);
     }
-  }, [generatedMidis, selectedGeneratedMidi, originalMidi, modelInfo, selectedModel]);
+  }, [generatedMidis, selectedGeneratedMidi, originalMidi, modelInfo, selectedModel, trackMutes]);
 
 
   useEffect(() => {
@@ -331,6 +480,48 @@ function App() {
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [playbackState, handlePlay, handlePause]);
+
+  const toggleMute = (trackIndex) => {
+    setTrackMutes(prev => ({
+      ...prev,
+      [trackIndex]: !prev[trackIndex]
+    }));
+  };
+
+  const toggleSolo = (trackIndex) => {
+    setTrackSolos(prev => ({
+      ...prev,
+      [trackIndex]: !prev[trackIndex]
+    }));
+  };
+
+  const deleteTrack = (trackIndex) => {
+    if (!midiData) return;
+    const newMidiData = { ...midiData };
+    newMidiData.tracks.splice(trackIndex, 1);
+    setMidiData({ ...newMidiData });
+    // Also update mutes to shift or remove
+    setTrackMutes(prev => {
+      const newMutes = {};
+      Object.keys(prev).forEach(key => {
+        const k = parseInt(key);
+        if (k < trackIndex) newMutes[k] = prev[k];
+        else if (k > trackIndex) newMutes[k - 1] = prev[k];
+      });
+      return newMutes;
+    });
+  };
+
+  const clearAllTracks = () => {
+    setMidiData(null);
+    setOriginalMidi(null);
+    setGeneratedMidis([]);
+    setInstruments([]);
+    setInstruments([]);
+    setTrackMutes({});
+    setTrackSolos({});
+    handleStop();
+  };
 
   const duration = midiData ? midiData.duration : 0;
 
@@ -369,10 +560,8 @@ function App() {
           <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 h-full">
             <div className="lg:col-span-4 space-y-6 overflow-y-auto pr-2 pb-2">
               <div className="card space-y-6">
-                <MidiInput onMidiUpload={handleMidiUpload} />
+
                 <Settings
-                  instrument={instrument}
-                  setInstrument={setInstrument}
                   tempo={tempo}
                   setTempo={setTempo}
                   selectedModel={selectedModel}
@@ -418,16 +607,28 @@ function App() {
 
             <div className="lg:col-span-8 h-full flex flex-col min-h-[400px]">
               <div className="card h-full flex flex-col p-0 overflow-hidden">
-                <PianoRoll
-                  ref={pianoRollRef}
-                  midiData={midiData}
-                  progress={progress}
-                  duration={duration}
-                  generationLength={generationLength}
-                  setGenerationLength={setGenerationLength}
-                  onSeek={handleSeek}
-                  onChordsChange={setChords}
-                />
+                {midiData ? (
+                  <PianoRoll
+                    ref={pianoRollRef}
+                    midiData={midiData}
+                    progress={progress}
+                    duration={duration}
+                    generationLength={generationLength}
+                    setGenerationLength={setGenerationLength}
+                    onSeek={handleSeek}
+                    onChordsChange={setChords}
+                    onMute={toggleMute}
+                    onSolo={toggleSolo}
+                    onDelete={deleteTrack}
+                    onClear={clearAllTracks}
+                    trackMutes={trackMutes}
+                    trackSolos={trackSolos}
+                  />
+                ) : (
+                  <div className="h-full p-6">
+                    <MidiInput onMidiUpload={handleMidiUpload} />
+                  </div>
+                )}
               </div>
             </div>
           </div>

@@ -31,21 +31,6 @@ const Settings = ({ instrument, setInstrument, tempo, setTempo, selectedModel, s
 
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                         <div className="space-y-1.5">
-                            <label className="text-sm font-medium text-muted">Instrument</label>
-                            <div className="relative">
-                                <select
-                                    value={instrument}
-                                    onChange={(e) => setInstrument(e.target.value)}
-                                    className="input-field appearance-none cursor-pointer"
-                                >
-                                    <option value="piano">Piano</option>
-                                    <option value="saxophone">Saxophone</option>
-                                </select>
-                                <ChevronDown className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted pointer-events-none" />
-                            </div>
-                        </div>
-
-                        <div className="space-y-1.5">
                             <label className="text-sm font-medium text-muted">Tempo (BPM)</label>
                             <input
                                 type="number"

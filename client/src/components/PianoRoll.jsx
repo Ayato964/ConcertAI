@@ -1,4 +1,5 @@
 import React, { useState, useRef, useEffect, useImperativeHandle, forwardRef } from 'react';
+import { Volume2, VolumeX, Trash2, Plus, RefreshCw } from 'lucide-react';
 import ChordProgression from './ChordProgression';
 
 const MEASURE_HEADER_HEIGHT = 30;
@@ -28,11 +29,12 @@ const NoteBar = ({ note, pixelsPerSecond, verticalZoom }) => {
     );
 };
 
-const PianoRoll = forwardRef(({ midiData, progress, duration, generationLength, setGenerationLength, onSeek, onChordsChange }, ref) => {
+const PianoRoll = forwardRef(({ midiData, progress, duration, generationLength, setGenerationLength, onSeek, onChordsChange, onMute, onSolo, onDelete, onClear, trackMutes, trackSolos }, ref) => {
     const [selectedMeasures, setSelectedMeasures] = useState([0, 0]);
     const [horizontalZoom, setHorizontalZoom] = useState(1);
     const [verticalZoom, setVerticalZoom] = useState(1);
     const [chords, setChords] = useState({});
+    const [selectedTrackIndex, setSelectedTrackIndex] = useState(0);
 
     useEffect(() => {
         if (onChordsChange) {
@@ -40,10 +42,19 @@ const PianoRoll = forwardRef(({ midiData, progress, duration, generationLength, 
         }
     }, [chords, onChordsChange]);
 
+    // Reset selected track when midiData changes
+    useEffect(() => {
+        setSelectedTrackIndex(0);
+    }, [midiData]);
+
     const pixelsPerSecond = 80 * horizontalZoom;
     const NOTE_HEIGHT = 20 * verticalZoom;
 
-    const allNotes = midiData ? midiData.tracks.flatMap(track => track.notes) : [];
+    // Filter notes based on selected track
+    const currentTrack = midiData?.tracks[selectedTrackIndex];
+    const allNotes = currentTrack ? currentTrack.notes : [];
+    const isMuted = trackMutes ? trackMutes[selectedTrackIndex] : false;
+    const isSoloed = trackSolos ? trackSolos[selectedTrackIndex] : false;
 
     const bpm = midiData?.header.tempos[0]?.bpm || 120;
     const timeSignature = midiData?.header.timeSignatures[0]?.timeSignature || [4, 4];
@@ -108,10 +119,10 @@ const PianoRoll = forwardRef(({ midiData, progress, duration, generationLength, 
 
     useEffect(() => {
         if (midiData && scrollContainerRef.current) {
-            const allNotesInMidi = midiData.tracks.flatMap(track => track.notes);
-            if (allNotesInMidi.length > 0) {
-                const minNote = Math.min(...allNotesInMidi.map(n => n.midi));
-                const maxNote = Math.max(...allNotesInMidi.map(n => n.midi));
+            // Use the filtered notes for centering
+            if (allNotes.length > 0) {
+                const minNote = Math.min(...allNotes.map(n => n.midi));
+                const maxNote = Math.max(...allNotes.map(n => n.midi));
 
                 const centerNoteMidi = (maxNote + minNote) / 2;
                 const centerNoteY = (127 - centerNoteMidi) * NOTE_HEIGHT;
@@ -122,7 +133,7 @@ const PianoRoll = forwardRef(({ midiData, progress, duration, generationLength, 
                 scrollContainerRef.current.scrollTop = scrollTop;
             }
         }
-    }, [midiData, verticalZoom, NOTE_HEIGHT]);
+    }, [midiData, verticalZoom, NOTE_HEIGHT, selectedTrackIndex]); // Re-center when track changes
 
     const handleContainerClick = (e) => {
         const rect = e.currentTarget.getBoundingClientRect();
@@ -172,6 +183,60 @@ const PianoRoll = forwardRef(({ midiData, progress, duration, generationLength, 
                         className="w-32 h-2 bg-surface rounded-lg appearance-none cursor-pointer accent-primary"
                     />
                 </div>
+
+                {midiData && midiData.tracks.length > 0 && (
+                    <>
+                        <div className="flex items-center gap-3">
+                            <span className="text-sm font-medium text-muted">Track</span>
+                            <select
+                                value={selectedTrackIndex}
+                                onChange={(e) => setSelectedTrackIndex(parseInt(e.target.value))}
+                                className="bg-surface text-text border border-border rounded px-2 py-1 text-sm focus:outline-none focus:border-primary"
+                            >
+                                {midiData.tracks.map((track, index) => (
+                                    <option key={index} value={index}>
+                                        {index + 1}: {track.name || track.instrument.name || `Track ${index + 1}`}
+                                    </option>
+                                ))}
+                            </select>
+                        </div>
+
+                        <div className="flex items-center gap-2 border-l border-border pl-4">
+                            <button
+                                onClick={() => onMute && onMute(selectedTrackIndex)}
+                                className={`p-2 rounded hover:bg-surface transition-colors ${isMuted ? 'text-red-500' : 'text-muted'}`}
+                                title={isMuted ? "Unmute Track" : "Mute Track"}
+                            >
+                                {isMuted ? <VolumeX size={18} /> : <Volume2 size={18} />}
+                            </button>
+                            <button
+                                onClick={() => onSolo && onSolo(selectedTrackIndex)}
+                                className={`p-2 rounded hover:bg-surface transition-colors ${isSoloed ? 'text-yellow-500' : 'text-muted'}`}
+                                title={isSoloed ? "Unsolo Track" : "Solo Track"}
+                            >
+                                <span className="font-bold text-sm">S</span>
+                            </button>
+                            <button
+                                onClick={() => onDelete && onDelete(selectedTrackIndex)}
+                                className="p-2 rounded hover:bg-red-500/20 text-muted hover:text-red-500 transition-colors"
+                                title="Delete Track"
+                            >
+                                <Trash2 size={18} />
+                            </button>
+                        </div>
+                    </>
+                )}
+
+                <div className="ml-auto">
+                    <button
+                        onClick={onClear}
+                        className="flex items-center gap-2 px-3 py-1.5 bg-surface hover:bg-surface/80 text-text rounded border border-border transition-colors text-sm"
+                        title="Clear All"
+                    >
+                        <RefreshCw size={14} />
+                        <span>Clear</span>
+                    </button>
+                </div>
             </div>
 
             <div
@@ -201,11 +266,17 @@ const PianoRoll = forwardRef(({ midiData, progress, duration, generationLength, 
                     ))}
                 </div>
 
-                <ChordProgression
-                    totalMeasures={totalMeasures}
-                    pixelsPerMeasure={pixelsPerMeasure}
-                    onChordsChange={setChords}
-                />
+                {/* Sticky Chord Progression */}
+                <div
+                    className="sticky top-[30px] left-0 z-20 bg-background border-b border-border"
+                    style={{ width: `${contentWidth}px` }}
+                >
+                    <ChordProgression
+                        totalMeasures={totalMeasures}
+                        pixelsPerMeasure={pixelsPerMeasure}
+                        onChordsChange={setChords}
+                    />
+                </div>
 
                 <div
                     onClick={handleContainerClick}
