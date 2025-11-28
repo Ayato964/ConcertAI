@@ -576,6 +576,7 @@ function App() {
                   setP={setP}
                   numGems={numGems}
                   setNumGems={setNumGems}
+                  rules={modelInfo.find(m => m.model_name === selectedModel)?.rule}
                 />
               </div>
 
@@ -626,7 +627,53 @@ function App() {
                   />
                 ) : (
                   <div className="h-full p-6">
-                    <MidiInput onMidiUpload={handleMidiUpload} />
+                    {(() => {
+                      const currentModel = modelInfo.find(m => m.model_name === selectedModel);
+                      const inputMidiAllowed = currentModel?.rule?.input_midi !== false;
+
+                      if (inputMidiAllowed) {
+                        return <MidiInput onMidiUpload={handleMidiUpload} />;
+                      } else {
+                        // Create a default empty MIDI object for display
+                        const emptyMidi = new Midi();
+                        // Add a dummy track so PianoRoll doesn't crash or look broken
+                        emptyMidi.addTrack();
+                        // We need to set this as midiData to trigger the PianoRoll render
+                        // But we can't do it inside render. 
+                        // Instead, we'll render a placeholder or trigger an effect.
+                        // Better approach: If input_midi is false, we should probably auto-initialize midiData 
+                        // or just render the PianoRoll with a dummy object directly here without setting state if we don't want to persist it yet.
+                        // However, PianoRoll expects midiData prop.
+                        // Let's use a temporary empty midi object just for rendering if we want to show "empty piano roll".
+
+                        // Actually, the requirement says: "Inputフォームの代わりに空のピアノロールを表示してください。"
+                        // If I just render PianoRoll here with empty data, it might work.
+
+                        // Let's create a memoized empty midi to avoid recreation
+                        const dummyMidi = new Midi();
+                        const track = dummyMidi.addTrack();
+                        // Add C4 quarter note to make it not completely empty if needed, or just leave empty.
+
+                        return (
+                          <PianoRoll
+                            ref={pianoRollRef}
+                            midiData={dummyMidi}
+                            progress={progress}
+                            duration={duration}
+                            generationLength={generationLength}
+                            setGenerationLength={setGenerationLength}
+                            onSeek={handleSeek}
+                            onChordsChange={setChords}
+                            onMute={toggleMute}
+                            onSolo={toggleSolo}
+                            onDelete={deleteTrack}
+                            onClear={clearAllTracks}
+                            trackMutes={trackMutes}
+                            trackSolos={trackSolos}
+                          />
+                        );
+                      }
+                    })()}
                   </div>
                 )}
               </div>
