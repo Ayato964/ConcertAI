@@ -47,7 +47,7 @@ const ModelSelector = ({ selectedModel, setSelectedModel, modelInfo, debugMode }
                             {selectedModelObject.description}
                         </div>
                         <div className="text-xs text-muted mt-2 pt-2 border-t border-border/50">
-                            Instruments: {selectedModelObject?.tag?.instrument}
+                            Instruments: {Array.isArray(selectedModelObject?.tag?.instruments) ? selectedModelObject.tag.instruments.join(', ') : selectedModelObject?.tag?.instruments}
                         </div>
                         <ChevronRight className="absolute right-4 top-1/2 -translate-y-1/2 w-5 h-5 text-muted group-hover:text-primary transition-colors" />
                     </button>
@@ -79,8 +79,8 @@ const ModelSelector = ({ selectedModel, setSelectedModel, modelInfo, debugMode }
                                     key={model.model_name}
                                     onClick={() => handleModelSelect(model.model_name)}
                                     className={`w-full p-4 text-left border rounded-lg transition-all duration-200 ${selectedModel === model.model_name
-                                            ? 'bg-primary/10 border-primary ring-1 ring-primary'
-                                            : 'bg-surface border-border hover:border-primary/50 hover:bg-surface/80'
+                                        ? 'bg-primary/10 border-primary ring-1 ring-primary'
+                                        : 'bg-surface border-border hover:border-primary/50 hover:bg-surface/80'
                                         }`}
                                 >
                                     <div className={`font-bold ${selectedModel === model.model_name ? 'text-primary' : 'text-text'}`}>
@@ -90,7 +90,7 @@ const ModelSelector = ({ selectedModel, setSelectedModel, modelInfo, debugMode }
                                         {model.description}
                                     </div>
                                     <div className="text-xs text-muted mt-2">
-                                        Instruments: {model?.tag?.instrument}
+                                        Instruments: {Array.isArray(model?.tag?.instruments) ? model.tag.instruments.join(', ') : model?.tag?.instruments}
                                     </div>
                                 </button>
                             ))}

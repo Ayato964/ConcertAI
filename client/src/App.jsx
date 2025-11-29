@@ -41,6 +41,8 @@ function App() {
   const [temperature, setTemperature] = useState(0.95);
   const [p, setP] = useState(0.95);
   const [numGems, setNumGems] = useState(3);
+  const [key, setKey] = useState('C M');
+  const [selectedInstruments, setSelectedInstruments] = useState([]);
 
   const [modelInfo, setModelInfo] = useState([]);
   const [generatedMidis, setGeneratedMidis] = useState([]);
@@ -316,13 +318,16 @@ function App() {
       setNotification({ open: true, message: "Please select a model from the Settings dropdown first.", severity: 'warning' });
       return;
     }
-    if (!originalMidi) {
+    const modelObject = modelInfo.find(model => model.model_name === selectedModel);
+    const modelType = modelObject?.tag?.model;
+
+    if (!originalMidi && modelType !== 'pretrained') {
       setNotification({ open: true, message: "Please upload a MIDI file first.", severity: 'warning' });
       return;
     }
 
-    const notes = pianoRollRef.current.getSelectedNotes();
-    if (notes.length === 0) {
+    const notes = pianoRollRef.current?.getSelectedNotes() || [];
+    if (notes.length === 0 && modelType !== 'pretrained') {
       setNotification({ open: true, message: "ピアノロールで生成元の小節を選択してください。", severity: 'warning' });
       return;
     }
@@ -339,10 +344,16 @@ function App() {
 
     const midiBlob = new Blob([midi.toArray()], { type: 'audio/midi' });
 
-    const modelObject = modelInfo.find(model => model.model_name === selectedModel);
-    const modelType = modelObject?.tag?.model;
-
-    const meta = { model_type: selectedModel, program: [0], tempo: tempo, task: "MELODY_GEM", p: p, temperature: temperature, split_measure: 99, num_gems: numGems };
+    const meta = {
+      model_type: selectedModel,
+      program: selectedInstruments,
+      tempo: tempo,
+      task: "MUSICGEM",
+      p: p,
+      temperature: temperature,
+      split_measure: 99,
+      key: key
+    };
 
     if (modelType === 'sft' && originalMidi) {
       const promptEndTime = notes.reduce((max, note) => Math.max(max, note.time + note.duration), 0);
@@ -379,34 +390,68 @@ function App() {
       const response = await fetch(`${API_BASE_URL}/generate`, { method: 'POST', body: formData });
 
       if (response.ok) {
-        const blob = await response.blob();
-        const zip = await JSZip.loadAsync(blob);
-        const midiPromises = [];
-        const jsonPromises = [];
+        const contentType = response.headers.get("content-type");
+        if (contentType && contentType.includes("application/zip")) {
+          const blob = await response.blob();
+          const zip = await JSZip.loadAsync(blob);
+          const midiPromises = [];
+          const jsonPromises = [];
 
-        zip.forEach((relativePath, zipEntry) => {
-          if (zipEntry.name.endsWith('.mid')) {
-            midiPromises.push(zipEntry.async('arraybuffer').then(buffer => new Midi(buffer)));
-          } else if (zipEntry.name.endsWith('.json')) {
-            jsonPromises.push(zipEntry.async('string'));
+          zip.forEach((relativePath, zipEntry) => {
+            if (zipEntry.name.endsWith('.mid')) {
+              midiPromises.push(zipEntry.async('arraybuffer').then(buffer => new Midi(buffer)));
+            } else if (zipEntry.name.endsWith('.json')) {
+              jsonPromises.push(zipEntry.async('string'));
+            }
+          });
+
+          const loadedMidis = await Promise.all(midiPromises);
+          const loadedJsons = await Promise.all(jsonPromises);
+
+          if (loadedJsons.length > 0) {
+            setNotification({ open: true, message: loadedJsons.join('\n'), severity: 'info' });
+          } else if (loadedMidis.length > 0) {
+            setGeneratedMidis(loadedMidis);
+            setSelectedGeneratedMidi(0);
+            setNotification({ open: true, message: `Successfully generated ${loadedMidis.length} MIDI file(s).`, severity: 'success' });
+          } else {
+            setNotification({ open: true, message: 'Generation complete, but no relevant files were produced.', severity: 'warning' });
           }
-        });
-
-        const loadedMidis = await Promise.all(midiPromises);
-        const loadedJsons = await Promise.all(jsonPromises);
-
-        if (loadedJsons.length > 0) {
-          setNotification({ open: true, message: loadedJsons.join('\n'), severity: 'info' });
-        } else if (loadedMidis.length > 0) {
-          setGeneratedMidis(loadedMidis);
+        } else if (contentType && (contentType.includes("audio/midi") || contentType.includes("application/x-midi"))) {
+          const blob = await response.blob();
+          const arrayBuffer = await blob.arrayBuffer();
+          const midi = new Midi(arrayBuffer);
+          setGeneratedMidis([midi]);
           setSelectedGeneratedMidi(0);
-          setNotification({ open: true, message: `Successfully generated ${loadedMidis.length} MIDI file(s).`, severity: 'success' });
+          setNotification({ open: true, message: `Successfully generated MIDI file.`, severity: 'success' });
         } else {
-          setNotification({ open: true, message: 'Generation complete, but no relevant files were produced.', severity: 'warning' });
+          // Fallback for unknown content type, try to parse as MIDI if possible or error
+          try {
+            const blob = await response.blob();
+            const arrayBuffer = await blob.arrayBuffer();
+            const midi = new Midi(arrayBuffer);
+            setGeneratedMidis([midi]);
+            setSelectedGeneratedMidi(0);
+            setNotification({ open: true, message: `Successfully generated MIDI file (fallback).`, severity: 'success' });
+          } catch (e) {
+            setNotification({ open: true, message: `Unknown response format: ${contentType}`, severity: 'error' });
+          }
         }
       } else {
-        const errorData = await response.json();
-        setNotification({ open: true, message: `Generation failed: ${errorData.detail || response.statusText}`, severity: 'error' });
+        const errorText = await response.text();
+        console.error('Generation failed response:', errorText);
+        let errorMessage = errorText;
+        try {
+          const errorData = JSON.parse(errorText);
+          if (errorData.detail) {
+            errorMessage = typeof errorData.detail === 'object'
+              ? JSON.stringify(errorData.detail, null, 2)
+              : errorData.detail;
+          }
+        } catch (e) {
+          // Not JSON
+        }
+        setNotification({ open: true, message: `Generation failed: ${errorMessage || response.statusText}`, severity: 'error' });
       }
     } catch (error) {
       console.error('Error during generation:', error);
@@ -568,6 +613,10 @@ function App() {
                   setSelectedModel={setSelectedModel}
                   modelInfo={modelInfo}
                   debugMode={debugMode}
+                  keySelection={key}
+                  setKey={setKey}
+                  selectedInstruments={selectedInstruments}
+                  setSelectedInstruments={setSelectedInstruments}
                 />
                 <AdvancedSettings
                   temperature={temperature}
