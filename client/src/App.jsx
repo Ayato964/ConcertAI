@@ -352,7 +352,8 @@ function App() {
       p: p,
       temperature: temperature,
       split_measure: 99,
-      key: key
+      key: key.replace(' ', ''),
+      num_gems: numGems
     };
 
     if (modelType === 'sft' && originalMidi) {
@@ -462,17 +463,17 @@ function App() {
   };
 
   useEffect(() => {
-    if (generatedMidis.length === 0 || !originalMidi || !modelInfo) {
-      if (originalMidi) setMidiData(originalMidi);
-      return;
-    }
-
     const modelObject = modelInfo.find(model => model.model_name === selectedModel);
     const modelType = modelObject?.tag?.model;
 
     const generatedMidi = generatedMidis[selectedGeneratedMidi];
 
     if (!modelType || !generatedMidi) return;
+
+    // If we have generated midis, we should display them.
+    // For pretrained, we don't need originalMidi.
+    // For sft, we need originalMidi to combine.
+
 
     if (modelType === 'pretrained') {
       setMidiData(generatedMidi);
