@@ -86,7 +86,30 @@ const PianoRoll = forwardRef(({ midiData, progress, duration, generationLength, 
             });
 
             return selectedNotes;
-        }
+        },
+        getPastNotes: (maxMeasures = 8) => {
+            if (!midiData || (selectedMeasures[0] === 0 && selectedMeasures[1] === 0)) {
+                return [];
+            }
+            const selectionStartTime = selectedMeasures[0] * secondsPerMeasure;
+            const pastStartTime = Math.max(0, (selectedMeasures[0] - maxMeasures) * secondsPerMeasure);
+
+            return allNotes.filter(note => {
+                return note.time >= pastStartTime && note.time < selectionStartTime;
+            });
+        },
+        getFutureNotes: (maxMeasures = 8) => {
+            if (!midiData || (selectedMeasures[0] === 0 && selectedMeasures[1] === 0)) {
+                return [];
+            }
+            const selectionEndTime = (selectedMeasures[1] + 1) * secondsPerMeasure;
+            const futureEndTime = (selectedMeasures[1] + 1 + maxMeasures) * secondsPerMeasure;
+
+            return allNotes.filter(note => {
+                return note.time >= selectionEndTime && note.time < futureEndTime;
+            });
+        },
+        getSelectedRange: () => selectedMeasures
     }));
 
     useEffect(() => {

@@ -320,6 +320,7 @@ function App() {
     }
     const modelObject = modelInfo.find(model => model.model_name === selectedModel);
     const modelType = modelObject?.tag?.model;
+    const rules = modelObject?.rule || {};
 
     if (!originalMidi && modelType !== 'pretrained') {
       setNotification({ open: true, message: "Please upload a MIDI file first.", severity: 'warning' });
@@ -327,10 +328,20 @@ function App() {
     }
 
     const notes = pianoRollRef.current?.getSelectedNotes() || [];
-    if (notes.length === 0 && modelType !== 'pretrained') {
+    const selectedRange = pianoRollRef.current?.getSelectedRange() || [0, 0];
+    const hasSelection = selectedRange[0] !== 0 || selectedRange[1] !== 0;
+
+    // Validation for selection
+    if (!hasSelection && modelType !== 'pretrained' && !rules.gen_measure_count) {
       setNotification({ open: true, message: "ピアノロールで生成元の小節を選択してください。", severity: 'warning' });
       return;
     }
+
+    if (rules.gen_measure_count && !hasSelection) {
+      setNotification({ open: true, message: "生成する小節の範囲を選択してください。", severity: 'warning' });
+      return;
+    }
+
 
     setIsGenerating(true);
     setNotification({ open: true, message: "Generating... Please wait.", severity: 'info' });
@@ -355,6 +366,11 @@ function App() {
       key: key.replace(' ', ''),
       num_gems: numGems
     };
+
+    if (rules.gen_measure_count && hasSelection) {
+      const measureCount = selectedRange[1] - selectedRange[0] + 1;
+      meta.generate_count = measureCount;
+    }
 
     if (modelType === 'sft' && originalMidi) {
       const promptEndTime = notes.reduce((max, note) => Math.max(max, note.time + note.duration), 0);
@@ -386,6 +402,46 @@ function App() {
     const formData = new FormData();
     formData.append('midi', midiBlob, 'input.mid');
     formData.append('meta_json', metaBlob, 'meta.json');
+
+    // Context Sending Logic
+    if (rules.send_context_past) {
+      const pastNotes = pianoRollRef.current?.getPastNotes(8) || [];
+      if (pastNotes.length > 0) {
+        const pastMidi = new Midi();
+        const pastTrack = pastMidi.addTrack();
+        pastNotes.forEach(note => {
+          pastTrack.addNote({ midi: note.midi, time: note.time, duration: note.duration, velocity: note.velocity });
+        });
+        const pastBlob = new Blob([pastMidi.toArray()], { type: 'audio/midi' });
+        formData.append('past_midi', pastBlob, 'past.mid');
+      }
+    }
+
+    if (rules.send_context_condition) {
+      // Condition is essentially the selected notes, but sent as a separate file
+      if (notes.length > 0) {
+        const conditionMidi = new Midi();
+        const conditionTrack = conditionMidi.addTrack();
+        notes.forEach(note => {
+          conditionTrack.addNote({ midi: note.midi, time: note.time, duration: note.duration, velocity: note.velocity });
+        });
+        const conditionBlob = new Blob([conditionMidi.toArray()], { type: 'audio/midi' });
+        formData.append('conditions_midi', conditionBlob, 'conditions.mid');
+      }
+    }
+
+    if (rules.send_context_future) {
+      const futureNotes = pianoRollRef.current?.getFutureNotes(8) || [];
+      if (futureNotes.length > 0) {
+        const futureMidi = new Midi();
+        const futureTrack = futureMidi.addTrack();
+        futureNotes.forEach(note => {
+          futureTrack.addNote({ midi: note.midi, time: note.time, duration: note.duration, velocity: note.velocity });
+        });
+        const futureBlob = new Blob([futureMidi.toArray()], { type: 'audio/midi' });
+        formData.append('future_midi', futureBlob, 'future.mid');
+      }
+    }
 
     try {
       const response = await fetch(`${API_BASE_URL}/generate`, { method: 'POST', body: formData });
