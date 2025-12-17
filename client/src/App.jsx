@@ -730,12 +730,14 @@ function App() {
                     onClear={clearAllTracks}
                     trackMutes={trackMutes}
                     trackSolos={trackSolos}
+                    selectionEnabled={modelInfo.find(m => m.model_name === selectedModel)?.rule?.gen_measure_count === true}
                   />
                 ) : (
                   <div className="h-full p-6">
                     {(() => {
                       const currentModel = modelInfo.find(m => m.model_name === selectedModel);
                       const inputMidiAllowed = currentModel?.rule?.input_midi !== false;
+                      const selectionEnabled = currentModel?.rule?.gen_measure_count === true;
 
                       if (inputMidiAllowed) {
                         return <MidiInput onMidiUpload={handleMidiUpload} />;
@@ -776,6 +778,7 @@ function App() {
                             onClear={clearAllTracks}
                             trackMutes={trackMutes}
                             trackSolos={trackSolos}
+                            selectionEnabled={selectionEnabled}
                           />
                         );
                       }

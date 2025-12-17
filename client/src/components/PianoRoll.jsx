@@ -29,7 +29,7 @@ const NoteBar = ({ note, pixelsPerSecond, verticalZoom }) => {
     );
 };
 
-const PianoRoll = forwardRef(({ midiData, progress, duration, generationLength, setGenerationLength, onSeek, onChordsChange, onMute, onSolo, onDelete, onClear, trackMutes, trackSolos }, ref) => {
+const PianoRoll = forwardRef(({ midiData, progress, duration, generationLength, setGenerationLength, onSeek, onChordsChange, onMute, onSolo, onDelete, onClear, trackMutes, trackSolos, selectionEnabled = true }, ref) => {
     const [selectedMeasures, setSelectedMeasures] = useState([0, 0]);
     const [horizontalZoom, setHorizontalZoom] = useState(1);
     const [verticalZoom, setVerticalZoom] = useState(1);
@@ -168,6 +168,8 @@ const PianoRoll = forwardRef(({ midiData, progress, duration, generationLength, 
     };
 
     const handleMeasureClick = (measureIndex) => {
+        if (!selectionEnabled) return;
+
         if (selectedMeasures[0] === 0 && selectedMeasures[1] === 0) {
             setSelectedMeasures([measureIndex, measureIndex]);
         } else if (measureIndex >= selectedMeasures[0] && measureIndex <= selectedMeasures[1]) {
