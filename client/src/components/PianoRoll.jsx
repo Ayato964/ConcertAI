@@ -63,7 +63,8 @@ const PianoRoll = forwardRef(({ midiData, progress, duration, generationLength, 
     const pixelsPerMeasure = secondsPerMeasure * pixelsPerSecond;
 
     const totalDuration = duration;
-    const totalMeasures = totalDuration > 0 ? Math.ceil(totalDuration / secondsPerMeasure) : 12;
+    const calculatedMeasures = totalDuration > 0 ? Math.ceil(totalDuration / secondsPerMeasure) : 12;
+    const totalMeasures = Math.max(calculatedMeasures, 96);
 
     const contentWidth = totalMeasures * pixelsPerMeasure;
     const contentHeight = 128 * NOTE_HEIGHT;
