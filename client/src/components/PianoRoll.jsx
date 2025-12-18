@@ -110,7 +110,8 @@ const PianoRoll = forwardRef(({ midiData, progress, duration, generationLength, 
                 return note.time >= selectionEndTime && note.time < futureEndTime;
             });
         },
-        getSelectedRange: () => selectedMeasures
+        getSelectedRange: () => selectedMeasures,
+        getSelectedTrackIndex: () => selectedTrackIndex
     }));
 
     useEffect(() => {

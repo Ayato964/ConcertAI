@@ -53,6 +53,7 @@ function App() {
   const [debugInfo, setDebugInfo] = useState(null);
   const [trackMutes, setTrackMutes] = useState({});
   const [trackSolos, setTrackSolos] = useState({});
+  const [generationRange, setGenerationRange] = useState(null);
 
   const scheduledEventsRef = useRef([]);
   const pianoRollRef = useRef();
@@ -370,6 +371,10 @@ function App() {
     if (rules.gen_measure_count && hasSelection) {
       const measureCount = selectedRange[1] - selectedRange[0] + 1;
       meta.generate_count = measureCount;
+      meta.genfield_measure = measureCount;
+      setGenerationRange(selectedRange);
+    } else {
+      setGenerationRange(null);
     }
 
     if (modelType === 'sft' && originalMidi) {
@@ -558,8 +563,61 @@ function App() {
         });
       });
       setMidiData(newMidi);
+    } else if (generationRange && originalMidi) {
+      // Merge logic for gen_measure_count
+      const targetTrackIndex = pianoRollRef.current?.getSelectedTrackIndex() || 0;
+      const bpm = originalMidi.header.tempos[0]?.bpm || 120;
+      const timeSignature = originalMidi.header.timeSignatures[0]?.timeSignature || [4, 4];
+      const secondsPerMeasure = (60 / bpm) * timeSignature[0];
+
+      const selectionStartTime = generationRange[0] * secondsPerMeasure;
+      const selectionEndTime = (generationRange[1] + 1) * secondsPerMeasure;
+
+      const newMidi = new Midi();
+      newMidi.header = originalMidi.header;
+
+      originalMidi.tracks.forEach((track, index) => {
+        const newTrack = newMidi.addTrack();
+        // Copy track info
+        newTrack.instrument = track.instrument;
+        newTrack.name = track.name;
+        newTrack.channel = track.channel;
+
+        if (index === targetTrackIndex) {
+          // This is the track to merge into
+          // 1. Add notes before selection
+          track.notes.forEach(note => {
+            if (note.time < selectionStartTime) {
+              newTrack.addNote(note);
+            }
+          });
+
+          // 2. Add generated notes (shifted to selection start)
+          generatedMidi.tracks.forEach(genTrack => {
+            genTrack.notes.forEach(note => {
+              newTrack.addNote({
+                ...note,
+                time: note.time + selectionStartTime
+              });
+            });
+          });
+
+          // 3. Add notes after selection
+          track.notes.forEach(note => {
+            if (note.time >= selectionEndTime) {
+              newTrack.addNote(note);
+            }
+          });
+        } else {
+          // Just copy other tracks
+          track.notes.forEach(note => {
+            newTrack.addNote(note);
+          });
+        }
+      });
+      setMidiData(newMidi);
     }
-  }, [generatedMidis, selectedGeneratedMidi, originalMidi, modelInfo, selectedModel, trackMutes]);
+  }, [generatedMidis, selectedGeneratedMidi, originalMidi, modelInfo, selectedModel, trackMutes, generationRange]);
 
 
   useEffect(() => {
