@@ -573,6 +573,10 @@ function App() {
       const selectionStartTime = generationRange[0] * secondsPerMeasure;
       const selectionEndTime = (generationRange[1] + 1) * secondsPerMeasure;
 
+      // Start merging from 1 measure before selection (if possible)
+      const mergeStartMeasure = Math.max(0, generationRange[0] - 1);
+      const mergeStartTime = mergeStartMeasure * secondsPerMeasure;
+
       const newMidi = new Midi();
       newMidi.header = originalMidi.header;
 
@@ -585,33 +589,62 @@ function App() {
 
         if (index === targetTrackIndex) {
           // This is the track to merge into
-          // 1. Add notes before selection
+          // 1. Add notes before selection (Original MIDI)
+          // We strictly keep original MIDI before the selection start time.
           track.notes.forEach(note => {
             if (note.time < selectionStartTime) {
-              newTrack.addNote(note);
+              newTrack.addNote({
+                midi: note.midi,
+                time: note.time,
+                duration: note.duration,
+                velocity: note.velocity
+              });
             }
           });
 
-          // 2. Add generated notes (shifted to selection start)
+          // 2. Add generated notes
+          // Shift them based on mergeStartTime (1 measure before selection),
+          // BUT only include them if they fall within the selection range (or after).
+          // The user requested: "Do not overwrite the part 1 measure before... overwrite the selection range".
           generatedMidi.tracks.forEach(genTrack => {
             genTrack.notes.forEach(note => {
-              newTrack.addNote({
-                ...note,
-                time: note.time + selectionStartTime
-              });
+              const newTime = note.time + mergeStartTime;
+              if (newTime >= selectionStartTime) {
+                newTrack.addNote({
+                  midi: note.midi,
+                  time: newTime,
+                  duration: note.duration,
+                  velocity: note.velocity
+                });
+              }
             });
           });
 
-          // 3. Add notes after selection
+          // 3. Add notes after selection (Original MIDI)
+          // Note: If the generated content goes beyond selectionEndTime, we might have overlap/double notes
+          // if we also keep original notes.
+          // Usually "overwrite selection range" implies we keep original after selectionEndTime.
+          // If generated content is longer, it might overlap.
+          // For now, assuming we keep original after selectionEndTime.
           track.notes.forEach(note => {
             if (note.time >= selectionEndTime) {
-              newTrack.addNote(note);
+              newTrack.addNote({
+                midi: note.midi,
+                time: note.time,
+                duration: note.duration,
+                velocity: note.velocity
+              });
             }
           });
         } else {
           // Just copy other tracks
           track.notes.forEach(note => {
-            newTrack.addNote(note);
+            newTrack.addNote({
+              midi: note.midi,
+              time: note.time,
+              duration: note.duration,
+              velocity: note.velocity
+            });
           });
         }
       });
