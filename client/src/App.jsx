@@ -344,8 +344,15 @@ function App() {
     }
 
 
+
     setIsGenerating(true);
     setNotification({ open: true, message: "Generating... Please wait.", severity: 'info' });
+
+    // FIX: Commit current midiData as originalMidi for context preservation
+    if (midiData) {
+      setOriginalMidi(new Midi(midiData.toArray()));
+    }
+
     setGeneratedMidis([]);
 
     const midi = new Midi();

@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect, useImperativeHandle, forwardRef } from 'react';
-import { Volume2, VolumeX, Trash2, Plus, RefreshCw } from 'lucide-react';
+import { Volume2, VolumeX, Trash2, Plus, RefreshCw, Download } from 'lucide-react';
 import ChordProgression from './ChordProgression';
 
 const MEASURE_HEADER_HEIGHT = 30;
@@ -262,6 +262,26 @@ const PianoRoll = forwardRef(({ midiData, progress, duration, generationLength, 
                     >
                         <RefreshCw size={14} />
                         <span>Clear</span>
+                    </button>
+                    <button
+                        onClick={() => {
+                            if (midiData) {
+                                const blob = new Blob([midiData.toArray()], { type: 'audio/midi' });
+                                const url = URL.createObjectURL(blob);
+                                const a = document.createElement('a');
+                                a.href = url;
+                                a.download = 'output.mid';
+                                document.body.appendChild(a);
+                                a.click();
+                                document.body.removeChild(a);
+                                URL.revokeObjectURL(url);
+                            }
+                        }}
+                        className="flex items-center gap-2 px-3 py-1.5 bg-surface hover:bg-surface/80 text-text rounded border border-border transition-colors text-sm ml-2"
+                        title="Download MIDI"
+                    >
+                        <Download size={14} />
+
                     </button>
                 </div>
             </div>

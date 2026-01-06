@@ -11,7 +11,7 @@ const Header = () => {
                         <Music className="w-6 h-6 text-primary" />
                     </div>
                     <h1 className="text-xl font-bold bg-gradient-to-r from-primary to-accent bg-clip-text text-transparent">
-                        ConcertAI HUB <span className="text-sm font-medium text-muted ml-2">ver.2.5.2</span>
+                        ConcertAI HUB <span className="text-sm font-medium text-muted ml-2">ver.2.6</span>
                     </h1>
                 </div>
 
