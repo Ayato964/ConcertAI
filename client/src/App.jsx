@@ -13,6 +13,7 @@ import PianoRoll from './components/PianoRoll.jsx';
 import { GM_INSTRUMENTS } from './constants/instrumentNames';
 import Sidebar from './components/Sidebar.jsx';
 import VSMode from './components/VSMode.jsx';
+import PodcastMode from './components/PodcastMode.jsx';
 
 const API_BASE_URL = import.meta.env.PROD
   ? import.meta.env.VITE_API_BASE_URL
@@ -62,6 +63,14 @@ function App() {
   const scheduledEventsRef = useRef([]);
   const pianoRollRef = useRef();
 
+  const schedulingStrategyRef = useRef('replace');
+  const lastScheduledTimeRef = useRef(0);
+
+  const handleAppendMidi = (newMidi) => {
+    schedulingStrategyRef.current = 'append';
+    setMidiData(newMidi);
+  };
+
   useEffect(() => {
     const fetchModelInfo = async () => {
       try {
@@ -84,6 +93,12 @@ function App() {
   const [instruments, setInstruments] = useState([]);
 
   useEffect(() => {
+    // skip instrument reload during append mode to prevent audio glitches
+    if (schedulingStrategyRef.current === 'append') {
+      console.log('Skipping instrument reload (Append Mode)');
+      return;
+    }
+
     console.log('Instrument loading effect running');
     setSamplerLoaded(false);
 
@@ -233,39 +248,66 @@ function App() {
     });
 
     if (midiData && samplerLoaded && instruments.length === midiData.tracks.length) {
-      console.log('Starting scheduling...');
-      scheduledEventsRef.current.forEach(id => Tone.Transport.clear(id));
-      scheduledEventsRef.current = [];
+      console.log(`Starting scheduling (Strategy: ${schedulingStrategyRef.current})...`);
 
-      const newScheduledEvents = [];
+      let newScheduledEvents = [];
+
+      if (schedulingStrategyRef.current === 'replace') {
+        // Clear previous events first
+        scheduledEventsRef.current.forEach(id => Tone.Transport.clear(id));
+        scheduledEventsRef.current = [];
+        lastScheduledTimeRef.current = 0;
+      } else {
+        // Append mode: Keep existing events
+        newScheduledEvents = [...scheduledEventsRef.current];
+      }
 
       midiData.tracks.forEach((track, index) => {
         const instObj = instruments[index];
         if (instObj) {
           track.notes.forEach(note => {
-            const eventId = Tone.Transport.schedule(time => {
-              if (instObj.type === 'tone') {
-                instObj.player.triggerAttackRelease(note.name, note.duration, time, note.velocity);
-              } else if (instObj.type === 'soundfont') {
-                // soundfont-player play method: play(note, time, { duration, gain })
-                // Note: time is AudioContext time. Tone.Transport.schedule passes AudioContext time.
-                instObj.player.play(note.name, time, {
-                  duration: note.duration,
-                  gain: note.velocity
-                });
-              }
-            }, note.time);
-            newScheduledEvents.push(eventId);
+            // Only schedule if note is new (starts after last scheduled time)
+            // tolerance of 0.001s
+            if (note.time >= lastScheduledTimeRef.current - 0.001) {
+              const eventId = Tone.Transport.schedule(time => {
+                if (instObj.type === 'tone') {
+                  instObj.player.triggerAttackRelease(note.name, note.duration, time, note.velocity);
+                } else if (instObj.type === 'soundfont') {
+                  // soundfont-player play method: play(note, time, { duration, gain })
+                  instObj.player.play(note.name, time, {
+                    duration: note.duration,
+                    gain: note.velocity
+                  });
+                }
+              }, note.time);
+              newScheduledEvents.push(eventId);
+            }
           });
         }
       });
 
-      console.log(`Scheduled ${newScheduledEvents.length} events`);
+      console.log(`Scheduled ${newScheduledEvents.length - (schedulingStrategyRef.current === 'append' ? scheduledEventsRef.current.length : 0)} new events`);
       scheduledEventsRef.current = newScheduledEvents;
 
+      // Update last scheduled time to current duration
+      lastScheduledTimeRef.current = midiData.duration;
+
+      // Update loop end
       Tone.Transport.loop = true;
       Tone.Transport.loopStart = 0;
       Tone.Transport.loopEnd = midiData.duration;
+
+      // Reset strategy to default
+      schedulingStrategyRef.current = 'replace';
+
+    } else {
+      // If conditions are not met (e.g. loading or no midi), ensure we clear old events
+      if (scheduledEventsRef.current.length > 0) {
+        console.log('Clearing scheduled events (conditions not met)...');
+        scheduledEventsRef.current.forEach(id => Tone.Transport.clear(id));
+        scheduledEventsRef.current = [];
+        lastScheduledTimeRef.current = 0;
+      }
     }
   }, [midiData, samplerLoaded, instruments]);
 
@@ -319,7 +361,7 @@ function App() {
   }
 
 
-  const generateMidi = async (targetModelName, targetNotes, targetRange, targetChords, targetMidiData) => {
+  const generateMidi = async (targetModelName, targetNotes, targetRange, targetChords, targetMidiData, overrideMeta = {}, customContext = {}) => {
     if (!targetModelName) {
       setNotification({ open: true, message: "Model not selected.", severity: 'warning' });
       return null;
@@ -542,7 +584,9 @@ function App() {
     formData.append('meta_json', metaBlob, 'meta.json');
 
     // Context Sending Logic
-    if (rules.send_context_past) {
+    if (customContext.pastMidiBlob) {
+      formData.append('past_midi', customContext.pastMidiBlob, 'past.mid');
+    } else if (rules.send_context_past) {
       const pastNotes = pianoRollRef.current?.getPastNotes(8) || [];
       if (pastNotes.length > 0) {
         const pastMidi = new Midi();
@@ -1027,42 +1071,59 @@ function App() {
               )}
             </div>
           ) : (
-            <VSMode
-              modelInfo={modelInfo}
-              midiData={midiData}
-              setMidiData={setMidiData}
-              pianoRollProps={{
-                // We pass refs via callback or just props? Ref is forwarded.
-                // PianoRoll uses ref for imperative handles (getSelectedNotes).
-                // If we have two PianoRolls, we need two Refs if we want to read them!
-                // This is a complexity. VSMode will need to manage refs to read notes for generation.
-                // For now, let's just pass visual props.
-                progress: progress,
-                duration: duration,
-                onSeek: handleSeek,
-                onMute: toggleMute,
-                onSolo: toggleSolo,
-                trackMutes: trackMutes,
-                trackSolos: trackSolos
-              }}
-              playbackState={playbackState}
-              onPlay={handlePlay}
-              onPause={handlePause}
-              onStop={handleStop}
-              settings={{
-                temperature, setTemperature,
-                p, setP,
-                numGems, setNumGems,
-                tempo, setTempo,
-                key, setKey,
-                selectedInstruments, setSelectedInstruments
-              }}
-              onGenerate={generateMidi}
-            />
+            <>
+              {activeMode === 'VS' && (
+                <VSMode
+                  modelInfo={modelInfo}
+                  midiData={midiData}
+                  setMidiData={setMidiData}
+                  pianoRollProps={{
+                    midiData,
+                    setMidiData,
+                    isPlaying: playbackState === 'playing',
+                    playbackTime: Tone.Transport.seconds,
+                    progress,
+                    onSeek: handleSeek
+                  }}
+                  settings={{
+                    temperature, setTemperature,
+                    p, setP,
+                    numGems, setNumGems
+                  }}
+                  onGenerate={generateMidi}
+                  playbackState={playbackState}
+                  onPlay={handlePlay}
+                  onPause={handlePause}
+                  onStop={handleStop}
+                />
+              )}
+              {activeMode === 'PODCAST' && (
+                <PodcastMode
+                  modelInfo={modelInfo}
+                  onGenerate={generateMidi}
+                  midiData={midiData}
+                  setMidiData={setMidiData}
+                  settings={{
+                    temperature, setTemperature,
+                    p, setP,
+                    numGems, setNumGems,
+                    tempo, setTempo,
+                    key, setKey,
+                    selectedInstruments, setSelectedInstruments
+                  }}
+                  playbackState={playbackState}
+                  onPlay={handlePlay}
+                  onPause={handlePause}
+                  onStop={handleStop}
+                  setNotification={setNotification}
+                  onAppendMidi={handleAppendMidi}
+                />
+              )}
+            </>
           )}
         </div>
-      </main>
-    </div>
+      </main >
+    </div >
   );
 }
 

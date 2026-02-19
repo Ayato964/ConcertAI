@@ -1,10 +1,11 @@
 import React from 'react';
-import { Play, Swords } from 'lucide-react';
+import { Play, Swords, Radio } from 'lucide-react';
 
 const Sidebar = ({ activeMode, setActiveMode }) => {
     const tabs = [
         { id: 'DEMO', label: 'DEMO', icon: Play },
         { id: 'VS', label: 'VS', icon: Swords },
+        { id: 'PODCAST', label: 'PODCAST', icon: Radio },
     ];
 
     return (
