@@ -51,13 +51,13 @@ const PianoRoll = forwardRef(({ midiData, progress, duration, generationLength, 
     const NOTE_HEIGHT = 20 * verticalZoom;
 
     // Filter notes based on selected track
-    const currentTrack = midiData?.tracks[selectedTrackIndex];
-    const allNotes = currentTrack ? currentTrack.notes : [];
+    const currentTrack = midiData?.tracks?.[selectedTrackIndex];
+    const allNotes = currentTrack?.notes || [];
     const isMuted = trackMutes ? trackMutes[selectedTrackIndex] : false;
     const isSoloed = trackSolos ? trackSolos[selectedTrackIndex] : false;
 
-    const bpm = midiData?.header.tempos[0]?.bpm || 120;
-    const timeSignature = midiData?.header.timeSignatures[0]?.timeSignature || [4, 4];
+    const bpm = midiData?.header?.tempos?.[0]?.bpm || 120;
+    const timeSignature = midiData?.header?.timeSignatures?.[0]?.timeSignature || [4, 4];
 
     const secondsPerMeasure = (60 / bpm) * timeSignature[0];
     const pixelsPerMeasure = secondsPerMeasure * pixelsPerSecond;

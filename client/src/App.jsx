@@ -11,6 +11,8 @@ import AdvancedSettings from './components/AdvancedSettings.jsx';
 import Controls from './components/Controls.jsx';
 import PianoRoll from './components/PianoRoll.jsx';
 import { GM_INSTRUMENTS } from './constants/instrumentNames';
+import Sidebar from './components/Sidebar.jsx';
+import VSMode from './components/VSMode.jsx';
 
 const API_BASE_URL = import.meta.env.PROD
   ? import.meta.env.VITE_API_BASE_URL
@@ -18,6 +20,7 @@ const API_BASE_URL = import.meta.env.PROD
 
 function App() {
   const [debugMode, setDebugMode] = useState(false);
+  const [activeMode, setActiveMode] = useState('DEMO');
 
   useEffect(() => {
     const urlParams = new URLSearchParams(window.location.search);
@@ -313,6 +316,112 @@ function App() {
     const base = chord.base === 'None' ? '' : chord.base;
     return `${chord.root}${quality}${base}`;
   }
+
+
+  const generateMidi = async (targetModelName, targetNotes, targetRange, targetChords, targetMidiData) => {
+    if (!targetModelName) {
+      setNotification({ open: true, message: "Model not selected.", severity: 'warning' });
+      return null;
+    }
+
+    const modelObject = modelInfo.find(model => model.model_name === targetModelName);
+    const modelType = modelObject?.tag?.model;
+    const rules = modelObject?.rule || {};
+
+    const midi = new Midi();
+    const track = midi.addTrack();
+    targetNotes.forEach(note => {
+      track.addNote({ midi: note.midi, time: note.time, duration: note.duration, velocity: note.velocity });
+    });
+
+    const midiBlob = new Blob([midi.toArray()], { type: 'audio/midi' });
+
+    const meta = {
+      model_type: targetModelName,
+      program: selectedInstruments,
+      tempo: tempo,
+      task: "MUSICGEM",
+      p: p,
+      temperature: temperature,
+      split_measure: 99,
+      key: key.replace(' ', ''),
+      num_gems: numGems
+    };
+
+    if (rules.gen_measure_count && targetRange) {
+      const measureCount = targetRange[1] - targetRange[0] + 1;
+      meta.generate_count = measureCount;
+      meta.genfield_measure = measureCount;
+    }
+
+    if (modelType === 'sft' && targetMidiData) {
+      const promptEndTime = targetNotes.reduce((max, note) => Math.max(max, note.time + note.duration), 0);
+
+      const bpm = targetMidiData.header.tempos[0]?.bpm || 120;
+      const timeSignature = targetMidiData.header.timeSignatures[0]?.timeSignature || [4, 4];
+      const beatsPerMeasure = timeSignature[0];
+      const secondsPerBeat = 60 / bpm;
+      const secondsPerMeasure = secondsPerBeat * beatsPerMeasure;
+
+      const allChordTimings = Object.entries(targetChords || {}).map(([key, value]) => {
+        const [measure, beat] = key.split('-').map(Number);
+        const startTime = (measure * secondsPerMeasure) + (beat * secondsPerBeat);
+        return { chord: value, startTime };
+      });
+
+      const subsequentChords = allChordTimings.filter(c => c.startTime >= promptEndTime);
+
+      meta.chord_item = subsequentChords.map(c => getChordText(c.chord));
+      meta.chord_times = subsequentChords.map(c => c.startTime - promptEndTime);
+    }
+
+    const metaBlob = new Blob([JSON.stringify(meta, null, 2)], { type: 'application/json' });
+
+    const formData = new FormData();
+    formData.append('midi', midiBlob, 'input.mid');
+    formData.append('meta_json', metaBlob, 'meta.json');
+
+    try {
+      const response = await fetch(`${API_BASE_URL}/generate`, { method: 'POST', body: formData });
+      if (!response.ok) {
+        const errorText = await response.text();
+        throw new Error(errorText);
+      }
+
+      const contentType = response.headers.get("content-type");
+
+      if (contentType && contentType.includes("application/zip")) {
+        const blob = await response.blob();
+        const zip = await JSZip.loadAsync(blob);
+        const midis = [];
+        let jsonMessage = "";
+
+        const entries = Object.entries(zip.files);
+        for (const [relativePath, zipEntry] of entries) {
+          if (zipEntry.name.endsWith('.mid')) {
+            const buffer = await zipEntry.async('arraybuffer');
+            midis.push(new Midi(buffer));
+          } else if (zipEntry.name.endsWith('.json')) {
+            jsonMessage += await zipEntry.async('string') + "\n";
+          }
+        }
+
+        if (jsonMessage) {
+          setNotification({ open: true, message: jsonMessage, severity: 'info' });
+        }
+
+        return midis;
+      } else {
+        const blob = await response.blob();
+        const arrayBuffer = await blob.arrayBuffer();
+        return [new Midi(arrayBuffer)];
+      }
+    } catch (error) {
+      console.error(error);
+      setNotification({ open: true, message: `Generation failed: ${error.message}`, severity: 'error' });
+      return null;
+    }
+  };
 
   const handleGenerate = async () => {
     if (!selectedModel) {
@@ -750,143 +859,187 @@ function App() {
 
       <Header />
 
-      <main className="flex-1 container mx-auto px-4 pb-4 max-w-[1600px] overflow-hidden">
-        {!samplerLoaded ? (
-          <div className="flex flex-col justify-center items-center h-full gap-4">
-            <Loader2 className="w-12 h-12 animate-spin text-primary" />
-            <p className="text-xl text-muted">Loading Samples...</p>
-          </div>
-        ) : (
-          <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 h-full">
-            <div className="lg:col-span-4 space-y-6 overflow-y-auto pr-2 pb-2">
-              <div className="card space-y-6">
+      <main className="flex-1 flex overflow-hidden">
+        <Sidebar activeMode={activeMode} setActiveMode={setActiveMode} />
 
-                <Settings
-                  tempo={tempo}
-                  setTempo={setTempo}
-                  selectedModel={selectedModel}
-                  setSelectedModel={setSelectedModel}
-                  modelInfo={modelInfo}
-                  debugMode={debugMode}
-                  keySelection={key}
-                  setKey={setKey}
-                  selectedInstruments={selectedInstruments}
-                  setSelectedInstruments={setSelectedInstruments}
-                />
-                <AdvancedSettings
-                  temperature={temperature}
-                  setTemperature={setTemperature}
-                  p={p}
-                  setP={setP}
-                  numGems={numGems}
-                  setNumGems={setNumGems}
-                  rules={modelInfo.find(m => m.model_name === selectedModel)?.rule}
-                />
-              </div>
+        <div className="flex-1 overflow-hidden relative">
+          {activeMode === 'DEMO' ? (
+            <div className="h-full overflow-hidden container mx-auto px-4 pb-4 max-w-[1600px] flex flex-col">
+              {!samplerLoaded ? (
+                <div className="flex flex-col justify-center items-center h-full gap-4">
+                  <Loader2 className="w-12 h-12 animate-spin text-primary" />
+                  <p className="text-xl text-muted">Loading Samples...</p>
+                </div>
+              ) : (
+                <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 h-full overflow-hidden pt-4">
+                  <div className="lg:col-span-4 space-y-6 overflow-y-auto pr-2 pb-2 h-full">
+                    {/* Added h-full to container for independent scrolling if needed, checking layout */}
+                    <div className="card space-y-6">
 
-              <div className="card">
-                <Controls
-                  onPlay={handlePlay}
-                  onPause={handlePause}
-                  onStop={handleStop}
-                  onGenerate={handleGenerate}
-                  isGenerating={isGenerating}
-                  playbackState={playbackState}
-                  progress={progress}
-                  duration={duration}
-                  generatedMidis={generatedMidis}
-                  selectedGeneratedMidi={selectedGeneratedMidi}
-                  onSelectedGeneratedMidiChange={setSelectedGeneratedMidi}
-                />
-              </div>
+                      <Settings
+                        tempo={tempo}
+                        setTempo={setTempo}
+                        selectedModel={selectedModel}
+                        setSelectedModel={setSelectedModel}
+                        modelInfo={modelInfo}
+                        debugMode={debugMode}
+                        keySelection={key}
+                        setKey={setKey}
+                        selectedInstruments={selectedInstruments}
+                        setSelectedInstruments={setSelectedInstruments}
+                      />
+                      <AdvancedSettings
+                        temperature={temperature}
+                        setTemperature={setTemperature}
+                        p={p}
+                        setP={setP}
+                        numGems={numGems}
+                        setNumGems={setNumGems}
+                        rules={modelInfo.find(m => m.model_name === selectedModel)?.rule}
+                      />
+                    </div>
 
-              {debugMode && debugInfo && (
-                <div className="p-4 border border-dashed border-border bg-surface/30 rounded-lg">
-                  <h6 className="text-lg font-semibold mb-2">Debug Information</h6>
-                  <pre className="whitespace-pre-wrap break-all text-xs font-mono text-muted">
-                    {JSON.stringify(debugInfo, null, 2)}
-                  </pre>
+                    <div className="card">
+                      <Controls
+                        onPlay={handlePlay}
+                        onPause={handlePause}
+                        onStop={handleStop}
+                        onGenerate={handleGenerate}
+                        isGenerating={isGenerating}
+                        playbackState={playbackState}
+                        progress={progress}
+                        duration={duration}
+                        generatedMidis={generatedMidis}
+                        selectedGeneratedMidi={selectedGeneratedMidi}
+                        onSelectedGeneratedMidiChange={setSelectedGeneratedMidi}
+                      />
+                    </div>
+
+                    {debugMode && debugInfo && (
+                      <div className="p-4 border border-dashed border-border bg-surface/30 rounded-lg">
+                        <h6 className="text-lg font-semibold mb-2">Debug Information</h6>
+                        <pre className="whitespace-pre-wrap break-all text-xs font-mono text-muted">
+                          {JSON.stringify(debugInfo, null, 2)}
+                        </pre>
+                      </div>
+                    )}
+                  </div>
+
+                  <div className="lg:col-span-8 h-full flex flex-col min-h-[400px]">
+                    <div className="card h-full flex flex-col p-0 overflow-hidden">
+                      {midiData ? (
+                        <PianoRoll
+                          ref={pianoRollRef}
+                          midiData={midiData}
+                          progress={progress}
+                          duration={duration}
+                          generationLength={generationLength}
+                          setGenerationLength={setGenerationLength}
+                          onSeek={handleSeek}
+                          onChordsChange={setChords}
+                          onMute={toggleMute}
+                          onSolo={toggleSolo}
+                          onDelete={deleteTrack}
+                          onClear={clearAllTracks}
+                          trackMutes={trackMutes}
+                          trackSolos={trackSolos}
+                          selectionEnabled={modelInfo.find(m => m.model_name === selectedModel)?.rule?.gen_measure_count === true}
+                        />
+                      ) : (
+                        <div className="h-full p-6">
+                          {(() => {
+                            const currentModel = modelInfo.find(m => m.model_name === selectedModel);
+                            const inputMidiAllowed = currentModel?.rule?.input_midi !== false;
+                            const selectionEnabled = currentModel?.rule?.gen_measure_count === true;
+
+                            if (inputMidiAllowed) {
+                              return <MidiInput onMidiUpload={handleMidiUpload} />;
+                            } else {
+                              // Create a default empty MIDI object for display
+                              const emptyMidi = new Midi();
+                              // Add a dummy track so PianoRoll doesn't crash or look broken
+                              emptyMidi.addTrack();
+                              // We need to set this as midiData to trigger the PianoRoll render
+                              // But we can't do it inside render. 
+                              // Instead, we'll render a placeholder or trigger an effect.
+                              // Better approach: If input_midi is false, we should probably auto-initialize midiData 
+                              // or just render the PianoRoll with a dummy object directly here without setting state if we don't want to persist it yet.
+                              // However, PianoRoll expects midiData prop.
+                              // Let's use a temporary empty midi object just for rendering if we want to show "empty piano roll".
+
+                              // Actually, the requirement says: "Inputフォームの代わりに空のピアノロールを表示してください。"
+                              // If I just render PianoRoll here with empty data, it might work.
+
+                              // Let's create a memoized empty midi to avoid recreation
+                              const dummyMidi = new Midi();
+                              dummyMidi.header.tempos.push({ bpm: tempo || 120, ticks: 0 });
+                              dummyMidi.header.timeSignatures.push({ timeSignature: [4, 4], ticks: 0 });
+                              const track = dummyMidi.addTrack();
+                              // Add C4 quarter note to make it not completely empty if needed, or just leave empty.
+
+                              return (
+                                <PianoRoll
+                                  ref={pianoRollRef}
+                                  midiData={dummyMidi}
+                                  progress={progress}
+                                  duration={duration}
+                                  generationLength={generationLength}
+                                  setGenerationLength={setGenerationLength}
+                                  onSeek={handleSeek}
+                                  onChordsChange={setChords}
+                                  onMute={toggleMute}
+                                  onSolo={toggleSolo}
+                                  onDelete={deleteTrack}
+                                  onClear={clearAllTracks}
+                                  trackMutes={trackMutes}
+                                  trackSolos={trackSolos}
+                                  selectionEnabled={selectionEnabled}
+                                />
+                              );
+                            }
+                          })()}
+                        </div>
+                      )}
+                    </div>
+                  </div>
                 </div>
               )}
             </div>
-
-            <div className="lg:col-span-8 h-full flex flex-col min-h-[400px]">
-              <div className="card h-full flex flex-col p-0 overflow-hidden">
-                {midiData ? (
-                  <PianoRoll
-                    ref={pianoRollRef}
-                    midiData={midiData}
-                    progress={progress}
-                    duration={duration}
-                    generationLength={generationLength}
-                    setGenerationLength={setGenerationLength}
-                    onSeek={handleSeek}
-                    onChordsChange={setChords}
-                    onMute={toggleMute}
-                    onSolo={toggleSolo}
-                    onDelete={deleteTrack}
-                    onClear={clearAllTracks}
-                    trackMutes={trackMutes}
-                    trackSolos={trackSolos}
-                    selectionEnabled={modelInfo.find(m => m.model_name === selectedModel)?.rule?.gen_measure_count === true}
-                  />
-                ) : (
-                  <div className="h-full p-6">
-                    {(() => {
-                      const currentModel = modelInfo.find(m => m.model_name === selectedModel);
-                      const inputMidiAllowed = currentModel?.rule?.input_midi !== false;
-                      const selectionEnabled = currentModel?.rule?.gen_measure_count === true;
-
-                      if (inputMidiAllowed) {
-                        return <MidiInput onMidiUpload={handleMidiUpload} />;
-                      } else {
-                        // Create a default empty MIDI object for display
-                        const emptyMidi = new Midi();
-                        // Add a dummy track so PianoRoll doesn't crash or look broken
-                        emptyMidi.addTrack();
-                        // We need to set this as midiData to trigger the PianoRoll render
-                        // But we can't do it inside render. 
-                        // Instead, we'll render a placeholder or trigger an effect.
-                        // Better approach: If input_midi is false, we should probably auto-initialize midiData 
-                        // or just render the PianoRoll with a dummy object directly here without setting state if we don't want to persist it yet.
-                        // However, PianoRoll expects midiData prop.
-                        // Let's use a temporary empty midi object just for rendering if we want to show "empty piano roll".
-
-                        // Actually, the requirement says: "Inputフォームの代わりに空のピアノロールを表示してください。"
-                        // If I just render PianoRoll here with empty data, it might work.
-
-                        // Let's create a memoized empty midi to avoid recreation
-                        const dummyMidi = new Midi();
-                        const track = dummyMidi.addTrack();
-                        // Add C4 quarter note to make it not completely empty if needed, or just leave empty.
-
-                        return (
-                          <PianoRoll
-                            ref={pianoRollRef}
-                            midiData={dummyMidi}
-                            progress={progress}
-                            duration={duration}
-                            generationLength={generationLength}
-                            setGenerationLength={setGenerationLength}
-                            onSeek={handleSeek}
-                            onChordsChange={setChords}
-                            onMute={toggleMute}
-                            onSolo={toggleSolo}
-                            onDelete={deleteTrack}
-                            onClear={clearAllTracks}
-                            trackMutes={trackMutes}
-                            trackSolos={trackSolos}
-                            selectionEnabled={selectionEnabled}
-                          />
-                        );
-                      }
-                    })()}
-                  </div>
-                )}
-              </div>
-            </div>
-          </div>
-        )}
+          ) : (
+            <VSMode
+              modelInfo={modelInfo}
+              midiData={midiData}
+              setMidiData={setMidiData}
+              pianoRollProps={{
+                // We pass refs via callback or just props? Ref is forwarded.
+                // PianoRoll uses ref for imperative handles (getSelectedNotes).
+                // If we have two PianoRolls, we need two Refs if we want to read them!
+                // This is a complexity. VSMode will need to manage refs to read notes for generation.
+                // For now, let's just pass visual props.
+                progress: progress,
+                duration: duration,
+                onSeek: handleSeek,
+                onMute: toggleMute,
+                onSolo: toggleSolo,
+                trackMutes: trackMutes,
+                trackSolos: trackSolos
+              }}
+              playbackState={playbackState}
+              onPlay={handlePlay}
+              onPause={handlePause}
+              onStop={handleStop}
+              settings={{
+                temperature, setTemperature,
+                p, setP,
+                numGems, setNumGems,
+                tempo, setTempo,
+                key, setKey,
+                selectedInstruments, setSelectedInstruments
+              }}
+              onGenerate={generateMidi}
+            />
+          )}
+        </div>
       </main>
     </div>
   );
