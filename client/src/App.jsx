@@ -46,6 +46,7 @@ function App() {
   const [numGems, setNumGems] = useState(3);
   const [key, setKey] = useState('C M');
   const [selectedInstruments, setSelectedInstruments] = useState([]);
+  const [densities, setDensities] = useState({});
 
   const [modelInfo, setModelInfo] = useState([]);
   const [generatedMidis, setGeneratedMidis] = useState([]);
@@ -484,6 +485,20 @@ function App() {
       num_gems: numGems
     };
 
+    if (rules.gen_note_dense) {
+      // Filter densities to only include selected instruments
+      const densityPayload = {};
+      selectedInstruments.forEach(inst => {
+        if (densities[inst]) {
+          densityPayload[inst] = densities[inst];
+        }
+      });
+      meta.gen_note_dense = densityPayload;
+      // Adding fallback keys based on user feedback and code patterns
+      meta.genfield_note_dense = densityPayload;
+      meta.note_density = densityPayload;
+    }
+
     if (rules.gen_measure_count && hasSelection) {
       const measureCount = selectedRange[1] - selectedRange[0] + 1;
       meta.generate_count = measureCount;
@@ -517,6 +532,8 @@ function App() {
     if (debugMode) {
       setDebugInfo({ meta });
     }
+
+    console.log('Sending Generation Request with Meta:', meta);
 
     const metaBlob = new Blob([JSON.stringify(meta, null, 2)], { type: 'application/json' });
 
@@ -877,6 +894,8 @@ function App() {
                     <div className="card space-y-6">
 
                       <Settings
+                        instrument={instrument}
+                        setInstrument={setInstrument}
                         tempo={tempo}
                         setTempo={setTempo}
                         selectedModel={selectedModel}
@@ -887,6 +906,8 @@ function App() {
                         setKey={setKey}
                         selectedInstruments={selectedInstruments}
                         setSelectedInstruments={setSelectedInstruments}
+                        densities={densities}
+                        setDensities={setDensities}
                       />
                       <AdvancedSettings
                         temperature={temperature}

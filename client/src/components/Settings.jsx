@@ -3,7 +3,7 @@ import { ChevronDown, ChevronUp, Settings as SettingsIcon, Music } from 'lucide-
 import ModelSelector from './ModelSelector';
 import KeySelector from './KeySelector';
 
-const Settings = ({ instrument, setInstrument, tempo, setTempo, selectedModel, setSelectedModel, modelInfo, debugMode, keySelection, setKey, selectedInstruments, setSelectedInstruments }) => {
+const Settings = ({ instrument, setInstrument, tempo, setTempo, selectedModel, setSelectedModel, modelInfo, debugMode, keySelection, setKey, selectedInstruments, setSelectedInstruments, densities, setDensities }) => {
     const [isOpen, setIsOpen] = useState(true);
     const [keySelectorOpen, setKeySelectorOpen] = useState(false);
 
@@ -11,6 +11,9 @@ const Settings = ({ instrument, setInstrument, tempo, setTempo, selectedModel, s
     const availableInstruments = currentModel?.tag?.instruments
         ? (Array.isArray(currentModel.tag.instruments) ? currentModel.tag.instruments : [currentModel.tag.instruments])
         : [];
+
+    // Check if density rule is active
+    const showDensitySettings = currentModel?.rule?.gen_note_dense === true;
 
     useEffect(() => {
         // Reset selected instruments when model changes
@@ -21,12 +24,37 @@ const Settings = ({ instrument, setInstrument, tempo, setTempo, selectedModel, s
         }
     }, [selectedModel, modelInfo]); // eslint-disable-line react-hooks/exhaustive-deps
 
+    // Initialize densities when selected instruments align
+    useEffect(() => {
+        if (showDensitySettings) {
+            const newDensities = { ...densities };
+            let changed = false;
+            selectedInstruments.forEach(inst => {
+                if (newDensities[inst] === undefined) {
+                    newDensities[inst] = 4; // Default density
+                    changed = true;
+                }
+            });
+            if (changed) {
+                setDensities(newDensities);
+            }
+        }
+    }, [selectedInstruments, showDensitySettings]);
+
+
     const toggleInstrument = (inst) => {
         if (selectedInstruments.includes(inst)) {
             setSelectedInstruments(selectedInstruments.filter(i => i !== inst));
         } else {
             setSelectedInstruments([...selectedInstruments, inst]);
         }
+    };
+
+    const handleDensityChange = (inst, value) => {
+        setDensities(prev => ({
+            ...prev,
+            [inst]: parseInt(value)
+        }));
     };
 
     const handleTempoChange = (e) => {
@@ -91,6 +119,32 @@ const Settings = ({ instrument, setInstrument, tempo, setTempo, selectedModel, s
                                     >
                                         {inst}
                                     </button>
+                                ))}
+                            </div>
+                        </div>
+                    )}
+
+                    {/* Density Settings */}
+                    {showDensitySettings && selectedInstruments.length > 0 && (
+                        <div className="space-y-3 pt-2 border-t border-border">
+                            <label className="text-sm font-medium text-muted">Note Density (1-8)</label>
+                            <div className="space-y-2">
+                                {selectedInstruments.map(inst => (
+                                    <div key={inst} className="space-y-1">
+                                        <div className="flex justify-between items-center text-xs">
+                                            <span className="font-mono text-primary">{inst}</span>
+                                            <span className="font-mono text-muted">{densities[inst] || 4}</span>
+                                        </div>
+                                        <input
+                                            type="range"
+                                            min="1"
+                                            max="8"
+                                            step="1"
+                                            value={densities[inst] || 4}
+                                            onChange={(e) => handleDensityChange(inst, e.target.value)}
+                                            className="w-full h-1.5 bg-surface rounded-lg appearance-none cursor-pointer accent-primary"
+                                        />
+                                    </div>
                                 ))}
                             </div>
                         </div>
