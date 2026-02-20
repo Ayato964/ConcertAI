@@ -83,6 +83,25 @@ const PodcastPlayer = ({ model, onBack, settings, onGenerate, setNotification, p
         setWaveActive(playbackState === 'playing');
     }, [playbackState]);
 
+    // Check if density rule is active
+    const showDensitySettings = model?.rule?.gen_note_dense === true;
+
+    useEffect(() => {
+        if (showDensitySettings && settings.selectedInstruments) {
+            const newDensities = { ...(settings.densities || {}) };
+            let changed = false;
+            settings.selectedInstruments.forEach(inst => {
+                if (newDensities[inst] === undefined) {
+                    newDensities[inst] = 4; // Default density
+                    changed = true;
+                }
+            });
+            if (changed && settings.setDensities) {
+                settings.setDensities(newDensities);
+            }
+        }
+    }, [settings.selectedInstruments, showDensitySettings]);
+
     // Instrument logic
     const availableInstruments = model?.tag?.instruments
         ? (Array.isArray(model.tag.instruments) ? model.tag.instruments : [model.tag.instruments])
@@ -269,16 +288,6 @@ const PodcastPlayer = ({ model, onBack, settings, onGenerate, setNotification, p
             // Using genfield_measure: 8 and generate_count: 8
             setIsGenerating(true);
 
-            // Pass user settings real-time but freeze the program (instruments)
-            // According to requirements: "生成する楽器は変えられないようにしてください。"
-            // `program` is normally drawn from `settings.selectedInstruments` in App.jsx.
-            // But we want to lock it to what was originally playing (or what the current composition has).
-            // Actually, `App.jsx` uses `settings.selectedInstruments` by default. We can override `program`
-            // with `compositionRef.current.tracks.map(...)` or rely on `App.jsx` if we pass an explicit `program`.
-
-            // To be safe, extract instruments currently used in the composition
-            const currentInstruments = Array.from(new Set(currentMidi.tracks.map(t => t.instrument.name || t.name || 'piano')));
-
             const overrideMeta = {
                 ai_continue_mode: true,
                 generate_count: 8,
@@ -286,31 +295,18 @@ const PodcastPlayer = ({ model, onBack, settings, onGenerate, setNotification, p
                 num_gems: 1,
                 key: settings.key.replace(' ', ''),
                 temperature: settings.temperature,
-                p: settings.p,
-                program: currentInstruments // Lock instruments to current composition
+                p: settings.p
             };
 
             if (model?.rule?.gen_note_dense && settings.densities) {
                 const densityPayload = {};
-                // Only use densities for the locked instruments
-                currentInstruments.forEach(inst => {
-                    // Try to match standard API names if exact name isn't found
-                    // Usually we have settings.densities keyed by availableInstruments strings
-                    // We will just map over settings.densities that match current active ones
-                    const matchedKey = Object.keys(settings.densities).find(k => k.toLowerCase().includes(inst.toLowerCase()) || inst.toLowerCase().includes(k.toLowerCase()));
-                    if (matchedKey) {
-                        densityPayload[matchedKey] = settings.densities[matchedKey];
-                    } else if (settings.densities[inst]) {
-                        densityPayload[inst] = settings.densities[inst];
-                    }
-                });
-                // Fallback if none matched but we have some densities
-                if (Object.keys(densityPayload).length === 0) {
+                if (settings.selectedInstruments && settings.selectedInstruments.length > 0) {
                     settings.selectedInstruments.forEach(inst => {
-                        if (settings.densities[inst]) densityPayload[inst] = settings.densities[inst];
+                        if (settings.densities[inst]) {
+                            densityPayload[inst] = settings.densities[inst];
+                        }
                     });
                 }
-
                 overrideMeta.gen_note_dense = densityPayload;
                 overrideMeta.genfield_note_dense = densityPayload;
                 overrideMeta.note_density = densityPayload;
@@ -542,14 +538,44 @@ const PodcastPlayer = ({ model, onBack, settings, onGenerate, setNotification, p
                                         {availableInstruments.map(inst => (
                                             <button
                                                 key={inst}
+                                                disabled={!!compositionRef.current}
                                                 onClick={() => toggleInstrument(inst)}
                                                 className={`px-2 py-1 rounded-md text-xs font-medium transition-all duration-200 ${settings.selectedInstruments?.includes(inst)
                                                     ? 'bg-primary text-white shadow-sm'
                                                     : 'bg-surface border border-border text-text hover:bg-surface/80'
-                                                    }`}
+                                                    } ${!!compositionRef.current ? 'opacity-50 cursor-not-allowed' : ''}`}
                                             >
                                                 {inst}
                                             </button>
+                                        ))}
+                                    </div>
+                                </div>
+                            )}
+
+                            {/* Density Settings */}
+                            {model?.rule?.gen_note_dense && settings.selectedInstruments?.length > 0 && (
+                                <div className="space-y-3 pt-2 border-t border-border mt-4">
+                                    <label className="text-xs font-medium text-muted">Note Density (1-8)</label>
+                                    <div className="space-y-2">
+                                        {settings.selectedInstruments.map(inst => (
+                                            <div key={inst} className="space-y-1">
+                                                <div className="flex justify-between items-center text-xs">
+                                                    <span className="font-mono text-primary">{inst}</span>
+                                                    <span className="font-mono text-muted">{settings.densities?.[inst] || 4}</span>
+                                                </div>
+                                                <input
+                                                    type="range"
+                                                    min="1"
+                                                    max="8"
+                                                    step="1"
+                                                    value={settings.densities?.[inst] || 4}
+                                                    onChange={(e) => {
+                                                        const newDensities = { ...(settings.densities || {}), [inst]: parseInt(e.target.value) };
+                                                        settings.setDensities(newDensities);
+                                                    }}
+                                                    className="w-full h-1.5 bg-surface rounded-lg appearance-none cursor-pointer accent-primary"
+                                                />
+                                            </div>
                                         ))}
                                     </div>
                                 </div>
