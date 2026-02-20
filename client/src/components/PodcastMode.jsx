@@ -255,7 +255,8 @@ const PodcastPlayer = ({ model, onBack, settings, onGenerate, setNotification, p
                 {
                     ai_continue_mode: true,
                     generate_count: 8,
-                    genfield_measure: 8
+                    genfield_measure: 8,
+                    num_gems: 1
                 },
                 { pastMidiBlob }
             );

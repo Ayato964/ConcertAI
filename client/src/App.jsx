@@ -418,11 +418,22 @@ function App() {
       meta.chord_times = subsequentChords.map(c => c.startTime - promptEndTime);
     }
 
-    const metaBlob = new Blob([JSON.stringify(meta, null, 2)], { type: 'application/json' });
+    const finalMeta = { ...meta, ...overrideMeta };
+    const metaBlob = new Blob([JSON.stringify(finalMeta, null, 2)], { type: 'application/json' });
 
     const formData = new FormData();
     formData.append('midi', midiBlob, 'input.mid');
     formData.append('meta_json', metaBlob, 'meta.json');
+
+    if (customContext?.pastMidiBlob) {
+      formData.append('past_midi', customContext.pastMidiBlob, 'past.mid');
+    }
+    if (customContext?.conditionsMidiBlob) {
+      formData.append('conditions_midi', customContext.conditionsMidiBlob, 'conditions.mid');
+    }
+    if (customContext?.futureMidiBlob) {
+      formData.append('future_midi', customContext.futureMidiBlob, 'future.mid');
+    }
 
     try {
       const response = await fetch(`${API_BASE_URL}/generate`, { method: 'POST', body: formData });
@@ -584,9 +595,7 @@ function App() {
     formData.append('meta_json', metaBlob, 'meta.json');
 
     // Context Sending Logic
-    if (customContext.pastMidiBlob) {
-      formData.append('past_midi', customContext.pastMidiBlob, 'past.mid');
-    } else if (rules.send_context_past) {
+    if (rules.send_context_past) {
       const pastNotes = pianoRollRef.current?.getPastNotes(8) || [];
       if (pastNotes.length > 0) {
         const pastMidi = new Midi();
