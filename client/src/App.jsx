@@ -1118,7 +1118,8 @@ function App() {
                     numGems, setNumGems,
                     tempo, setTempo,
                     key, setKey,
-                    selectedInstruments, setSelectedInstruments
+                    selectedInstruments, setSelectedInstruments,
+                    densities, setDensities
                   }}
                   playbackState={playbackState}
                   onPlay={handlePlay}

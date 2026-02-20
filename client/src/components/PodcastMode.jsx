@@ -103,9 +103,31 @@ const PodcastPlayer = ({ model, onBack, settings, onGenerate, setNotification, p
         onStop();
         setInitialClips([]);
         try {
-            // Initial generation: 3 gems
+            // Include user settings but don't force them strictly on pretrained?
+            // User requested: "都度ユーザーが入力するパラメータは必ず参照するようにしてください"
+            const overrideMeta = {
+                num_gems: 3,
+                key: settings.key.replace(' ', ''),
+                temperature: settings.temperature,
+                p: settings.p
+            };
+
+            if (model?.rule?.gen_note_dense && settings.densities) {
+                const densityPayload = {};
+                if (settings.selectedInstruments && settings.selectedInstruments.length > 0) {
+                    settings.selectedInstruments.forEach(inst => {
+                        if (settings.densities[inst]) {
+                            densityPayload[inst] = settings.densities[inst];
+                        }
+                    });
+                }
+                overrideMeta.gen_note_dense = densityPayload;
+                overrideMeta.genfield_note_dense = densityPayload;
+                overrideMeta.note_density = densityPayload;
+            }
+
             console.log("Generating initial 3 clips...");
-            const results = await onGenerate(model.model_name, [], null, {}, null, { num_gems: 3 });
+            const results = await onGenerate(model.model_name, [], null, {}, null, overrideMeta);
             if (results && results.length > 0) {
                 setInitialClips(results);
             }
@@ -246,18 +268,61 @@ const PodcastPlayer = ({ model, onBack, settings, onGenerate, setNotification, p
             // B. Generate extension (8 bars as requested)
             // Using genfield_measure: 8 and generate_count: 8
             setIsGenerating(true);
+
+            // Pass user settings real-time but freeze the program (instruments)
+            // According to requirements: "生成する楽器は変えられないようにしてください。"
+            // `program` is normally drawn from `settings.selectedInstruments` in App.jsx.
+            // But we want to lock it to what was originally playing (or what the current composition has).
+            // Actually, `App.jsx` uses `settings.selectedInstruments` by default. We can override `program`
+            // with `compositionRef.current.tracks.map(...)` or rely on `App.jsx` if we pass an explicit `program`.
+
+            // To be safe, extract instruments currently used in the composition
+            const currentInstruments = Array.from(new Set(currentMidi.tracks.map(t => t.instrument.name || t.name || 'piano')));
+
+            const overrideMeta = {
+                ai_continue_mode: true,
+                generate_count: 8,
+                genfield_measure: 8,
+                num_gems: 1,
+                key: settings.key.replace(' ', ''),
+                temperature: settings.temperature,
+                p: settings.p,
+                program: currentInstruments // Lock instruments to current composition
+            };
+
+            if (model?.rule?.gen_note_dense && settings.densities) {
+                const densityPayload = {};
+                // Only use densities for the locked instruments
+                currentInstruments.forEach(inst => {
+                    // Try to match standard API names if exact name isn't found
+                    // Usually we have settings.densities keyed by availableInstruments strings
+                    // We will just map over settings.densities that match current active ones
+                    const matchedKey = Object.keys(settings.densities).find(k => k.toLowerCase().includes(inst.toLowerCase()) || inst.toLowerCase().includes(k.toLowerCase()));
+                    if (matchedKey) {
+                        densityPayload[matchedKey] = settings.densities[matchedKey];
+                    } else if (settings.densities[inst]) {
+                        densityPayload[inst] = settings.densities[inst];
+                    }
+                });
+                // Fallback if none matched but we have some densities
+                if (Object.keys(densityPayload).length === 0) {
+                    settings.selectedInstruments.forEach(inst => {
+                        if (settings.densities[inst]) densityPayload[inst] = settings.densities[inst];
+                    });
+                }
+
+                overrideMeta.gen_note_dense = densityPayload;
+                overrideMeta.genfield_note_dense = densityPayload;
+                overrideMeta.note_density = densityPayload;
+            }
+
             const results = await onGenerate(
                 model.model_name,
                 [],
                 null,
                 {},
                 null,
-                {
-                    ai_continue_mode: true,
-                    generate_count: 8,
-                    genfield_measure: 8,
-                    num_gems: 1
-                },
+                overrideMeta,
                 { pastMidiBlob }
             );
 
