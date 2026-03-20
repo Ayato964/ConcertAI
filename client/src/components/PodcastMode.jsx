@@ -116,6 +116,18 @@ const PodcastPlayer = ({ model, onBack, settings, onGenerate, setNotification, p
         }
     };
 
+    // Use a ref for settings to allow the recursive loop to access real-time values
+    const settingsRef = useRef(settings);
+    useEffect(() => {
+        settingsRef.current = settings;
+    }, [settings]);
+
+    // Track playback state in a ref for the recursive loop
+    const playbackStateRef = useRef(playbackState);
+    useEffect(() => {
+        playbackStateRef.current = playbackState;
+    }, [playbackState]);
+
     const handleInitialGenerate = async () => {
         if (isGenerating || !model) return;
         setIsGenerating(true);
@@ -240,6 +252,22 @@ const PodcastPlayer = ({ model, onBack, settings, onGenerate, setNotification, p
             }
             // ------------------------
 
+            // --- Pause/Stop Logic ---
+            if (playbackStateRef.current === 'paused') {
+                console.log("[Podcast] Playback paused. Waiting...");
+                setTimeout(() => {
+                    requestAnimationFrame(() => recursiveGenerationLoop());
+                }, 1000);
+                return;
+            }
+
+            if (!isLoopingRef.current) {
+                console.log("[Podcast] Loop flag is false. Terminating loop.");
+                setIsGenerating(false);
+                return;
+            }
+            // ------------------------
+
             // A. Prepare past_midi (last 4 measures)
             const last4MeasuresDuration = measureDuration * 4;
             // Ensure we don't start before 0
@@ -293,17 +321,17 @@ const PodcastPlayer = ({ model, onBack, settings, onGenerate, setNotification, p
                 generate_count: 8,
                 genfield_measure: 8,
                 num_gems: 1,
-                key: settings.key.replace(' ', ''),
-                temperature: settings.temperature,
-                p: settings.p
+                key: settingsRef.current.key.replace(' ', ''),
+                temperature: settingsRef.current.temperature,
+                p: settingsRef.current.p
             };
 
-            if (model?.rule?.gen_note_dense && settings.densities) {
+            if (model?.rule?.gen_note_dense && settingsRef.current.densities) {
                 const densityPayload = {};
-                if (settings.selectedInstruments && settings.selectedInstruments.length > 0) {
-                    settings.selectedInstruments.forEach(inst => {
-                        if (settings.densities[inst]) {
-                            densityPayload[inst] = settings.densities[inst];
+                if (settingsRef.current.selectedInstruments && settingsRef.current.selectedInstruments.length > 0) {
+                    settingsRef.current.selectedInstruments.forEach(inst => {
+                        if (settingsRef.current.densities[inst]) {
+                            densityPayload[inst] = settingsRef.current.densities[inst];
                         }
                     });
                 }
@@ -498,6 +526,15 @@ const PodcastPlayer = ({ model, onBack, settings, onGenerate, setNotification, p
                                     </div>
                                 )
                             })}
+                        </div>
+                        <div className="flex justify-center mt-6">
+                            <button
+                                onClick={handleInitialGenerate}
+                                disabled={isGenerating}
+                                className="px-6 py-2 bg-surface border border-border rounded-full text-sm font-medium hover:bg-surface/80 flex items-center gap-2 transition-all"
+                            >
+                                <SkipForward className="w-4 h-4" /> Regenerate Options
+                            </button>
                         </div>
                     </div>
                 )}

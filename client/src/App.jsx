@@ -83,7 +83,7 @@ function App() {
         setModelInfo(modelArray);
       } catch (error) {
         console.error('Failed to fetch model info:', error);
-        setNotification({ open: true, message: `Failed to load model list: ${error.message}`, severity: 'error' });
+        setNotification({ open: true, message: `申し訳ありません、現在サーバー上で機械学習を行っているため、デモを実行できません`, severity: 'error' });
       }
     };
 
