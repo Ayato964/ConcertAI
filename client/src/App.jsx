@@ -58,6 +58,7 @@ function App() {
   const [debugInfo, setDebugInfo] = useState(null);
   const [trackMutes, setTrackMutes] = useState({});
   const [trackSolos, setTrackSolos] = useState({});
+  const [showServiceUnavailableModal, setShowServiceUnavailableModal] = useState(false);
   const [generationRange, setGenerationRange] = useState(null);
 
   const scheduledEventsRef = useRef([]);
@@ -83,7 +84,7 @@ function App() {
         setModelInfo(modelArray);
       } catch (error) {
         console.error('Failed to fetch model info:', error);
-        setNotification({ open: true, message: `申し訳ありません、現在サーバー上で機械学習を行っているため、デモを実行できません`, severity: 'error' });
+        setShowServiceUnavailableModal(true);
       }
     };
 
@@ -906,6 +907,20 @@ function App() {
 
   return (
     <div className="h-screen bg-background text-text flex flex-col overflow-hidden">
+      {/* Service Unavailable Modal */}
+      {showServiceUnavailableModal && (
+        <div className="fixed inset-0 z-[200] flex items-center justify-center bg-black/50 backdrop-blur-md">
+          <div className="bg-surface p-8 border border-border rounded-xl text-center max-w-lg mx-4 shadow-2xl animate-in fade-in zoom-in duration-300">
+            <AlertCircle className="w-16 h-16 text-yellow-500 mx-auto mb-6" />
+            <h2 className="text-2xl font-bold mb-4">サービス停止中</h2>
+            <p className="text-muted text-lg leading-relaxed whitespace-pre-line">
+              申し訳ありません、現在サーバー上で機械学習を行っているため、
+              デモを実行できません。
+            </p>
+          </div>
+        </div>
+      )}
+
       {/* Toast Notification */}
       {notification.open && (
         <div className={`fixed top-4 right-4 z-[100] p-4 rounded-lg shadow-lg border flex items-start gap-3 max-w-md animate-in slide-in-from-right-5 fade-in duration-300 ${notification.severity === 'error' ? 'bg-red-900/90 border-red-700 text-red-100' :
