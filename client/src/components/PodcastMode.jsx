@@ -3,6 +3,7 @@ import { ArrowLeft, Play, Pause, Square, Music, Activity, SkipForward, Volume2, 
 import ModelGridSelector from './ModelGridSelector';
 import AdvancedSettings from './AdvancedSettings';
 import KeySelector from './KeySelector';
+import PianoRoll from './PianoRoll';
 import * as Tone from 'tone';
 import { Midi } from '@tonejs/midi';
 
@@ -17,7 +18,9 @@ const PodcastMode = ({
     onPause,
     onStop,
     setNotification,
-    onAppendMidi
+    onAppendMidi,
+    progress,
+    onSeek
 }) => {
     const [step, setStep] = useState(1);
     const [selectedModel, setSelectedModel] = useState(null);
@@ -59,29 +62,49 @@ const PodcastMode = ({
                     midiData={midiData}
                     setMidiData={setMidiData}
                     onAppendMidi={onAppendMidi}
+                    progress={progress}
+                    onSeek={onSeek}
                 />
             )}
         </div>
     );
 };
 
-const PodcastPlayer = ({ model, onBack, settings, onGenerate, setNotification, playbackState, onPlay, onPause, onStop, midiData, setMidiData, onAppendMidi }) => {
+const PodcastPlayer = ({ model, onBack, settings, onGenerate, setNotification, playbackState, onPlay, onPause, onStop, midiData, setMidiData, onAppendMidi, progress, onSeek }) => {
     const [initialClips, setInitialClips] = useState([]);
     const [isGenerating, setIsGenerating] = useState(false);
     const [conversationStats, setConversationStats] = useState({ measures: 0, duration: 0 });
     const [waveActive, setWaveActive] = useState(false);
     const [previewClip, setPreviewClip] = useState(null);
     const [keySelectorOpen, setKeySelectorOpen] = useState(false);
+    const [uploadedMidi, setUploadedMidi] = useState(null);
 
     // Using a ref to track the full MIDI composition to avoid playing state issues
     // We treat compositionRef as the "Podcast Stream"
     const compositionRef = useRef(null);
     const isLoopingRef = useRef(false);
+    const pianoRollRef = useRef(null);
 
     useEffect(() => {
         // Wave active only when playing AND (looping or previewing)
         setWaveActive(playbackState === 'playing');
     }, [playbackState]);
+
+    // Spacebar playback toggle
+    useEffect(() => {
+        const handleKeyDown = (e) => {
+            if (e.code === 'Space' && e.target.tagName !== 'INPUT' && e.target.tagName !== 'TEXTAREA') {
+                e.preventDefault();
+                if (playbackState === 'playing') {
+                    onPause();
+                } else {
+                    onPlay();
+                }
+            }
+        };
+        window.addEventListener('keydown', handleKeyDown);
+        return () => window.removeEventListener('keydown', handleKeyDown);
+    }, [playbackState, onPlay, onPause]);
 
     // Check if density rule is active
     const showDensitySettings = model?.rule?.gen_note_dense === true;
@@ -228,7 +251,7 @@ const PodcastPlayer = ({ model, onBack, settings, onGenerate, setNotification, p
 
             const bpm = currentMidi.header.tempos[0]?.bpm || 120;
             const measureDuration = (60 / bpm) * 4;
-            const totalMeasures = currentMidi.duration / measureDuration;
+            const totalMeasures = Math.ceil((currentMidi.duration - 0.01) / measureDuration);
 
             // Check playback trigger before throttling
             // Requirement 3C: "Start playback when main melody > 16 measures."
@@ -270,8 +293,9 @@ const PodcastPlayer = ({ model, onBack, settings, onGenerate, setNotification, p
 
             // A. Prepare past_midi (last 4 measures)
             const last4MeasuresDuration = measureDuration * 4;
-            // Ensure we don't start before 0
-            const startTime = Math.max(0, currentMidi.duration - last4MeasuresDuration);
+            // Use grid-aligned duration to prevent off-beat shifts
+            const gridDuration = totalMeasures * measureDuration;
+            const startTime = Math.max(0, gridDuration - last4MeasuresDuration);
 
             const pastMidi = new Midi();
 
@@ -386,7 +410,10 @@ const PodcastPlayer = ({ model, onBack, settings, onGenerate, setNotification, p
         const measureDuration = (60 / bpm) * 4;
         const contextDuration = measureDuration * 4;
 
-        const shiftAmount = currentMidi.duration - contextDuration;
+        // Use mathematically grid-aligned duration
+        const totalMeasures = Math.ceil((currentMidi.duration - 0.01) / measureDuration);
+        const gridDuration = totalMeasures * measureDuration;
+        const shiftAmount = gridDuration - contextDuration;
 
         // We only append notes that start AFTER the context duration in the result
         // to avoid duplicating the context.
@@ -441,6 +468,81 @@ const PodcastPlayer = ({ model, onBack, settings, onGenerate, setNotification, p
         }
     }, []);
 
+    const processMidiFile = async (file) => {
+        if (!file) return;
+        try {
+            const arrayBuffer = await file.arrayBuffer();
+            const midi = new Midi(arrayBuffer);
+            setUploadedMidi(midi);
+            setMidiData(midi); // Pass to global for preview playback
+        } catch (error) {
+            console.error("Error parsing MIDI:", error);
+            setNotification({ open: true, message: "Error parsing MIDI file", severity: "error" });
+        }
+    };
+
+    const handleCropAndStart = () => {
+        if (!uploadedMidi) return;
+        
+        const selectedRange = pianoRollRef.current?.getSelectedRange() || [0,0];
+        const bpm = uploadedMidi.header.tempos[0]?.bpm || 120;
+        const timeSignature = uploadedMidi.header.timeSignatures[0]?.timeSignature || [4, 4];
+        const secondsPerMeasure = (60 / bpm) * timeSignature[0];
+        
+        let targetMidi;
+        
+        if (selectedRange[0] === 0 && selectedRange[1] === 0) {
+            targetMidi = uploadedMidi;
+        } else {
+            const startTime = selectedRange[0] * secondsPerMeasure;
+            const endTime = (selectedRange[1] + 1) * secondsPerMeasure;
+            
+            const newMidi = new Midi();
+            if (uploadedMidi.header) {
+                newMidi.header.tempos = JSON.parse(JSON.stringify(uploadedMidi.header.tempos));
+                newMidi.header.timeSignatures = JSON.parse(JSON.stringify(uploadedMidi.header.timeSignatures));
+                newMidi.header.name = uploadedMidi.header.name;
+            }
+
+            uploadedMidi.tracks.forEach(t => {
+                const track = newMidi.addTrack();
+                track.instrument = t.instrument;
+                track.channel = t.channel;
+                t.notes.forEach(n => {
+                    if (n.time >= startTime && n.time < endTime) {
+                        track.addNote({
+                            midi: n.midi,
+                            time: n.time - startTime,
+                            duration: Math.min(n.duration, endTime - n.time),
+                            velocity: n.velocity
+                        });
+                    }
+                });
+            });
+            targetMidi = newMidi;
+        }
+        
+        setUploadedMidi(null);
+        handleSelectClip(targetMidi);
+    };
+
+    const handleDrop = (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        const file = event.dataTransfer?.files[0];
+        if (file && (file.name.endsWith('.mid') || file.name.endsWith('.midi'))) {
+            processMidiFile(file);
+        } else {
+            setNotification({ open: true, message: "Please upload a valid .mid or .midi file", severity: "warning" });
+        }
+    };
+
+    const handleDragOver = (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        event.dataTransfer.dropEffect = 'copy';
+    };
+
     return (
         <div className="flex flex-col h-full animate-in fade-in zoom-in-95 duration-300">
             {/* Header */}
@@ -467,7 +569,11 @@ const PodcastPlayer = ({ model, onBack, settings, onGenerate, setNotification, p
             <div className="flex-1 flex flex-col items-center justify-center p-8 overflow-y-auto w-full relative">
 
                 {/* Visualizer */}
-                <div className="w-full max-w-2xl h-64 bg-black/40 rounded-3xl border border-white/5 flex items-center justify-center mb-8 relative overflow-hidden group">
+                <div 
+                    className="w-full max-w-2xl h-64 bg-black/40 rounded-3xl border border-white/5 flex items-center justify-center mb-8 relative overflow-hidden group"
+                    onDrop={handleDrop}
+                    onDragOver={handleDragOver}
+                >
                     <div className={`flex items-end gap-1 h-32 ${waveActive ? 'opacity-100' : 'opacity-30'}`}>
                         {[...Array(20)].map((_, i) => (
                             <div
@@ -489,7 +595,7 @@ const PodcastPlayer = ({ model, onBack, settings, onGenerate, setNotification, p
                             className="absolute inset-0 flex items-center justify-center bg-black/50 hover:bg-black/40 transition-all text-white backdrop-blur-sm"
                         >
                             <Play className="w-20 h-20 fill-white drop-shadow-lg scale-100 hover:scale-110 transition-transform" />
-                            <span className="absolute mt-24 text-lg font-bold">Start Podcast</span>
+                            <span className="absolute mt-24 text-lg font-bold">Press Start or Upload MIDI File</span>
                         </button>
                     )}
 
@@ -643,6 +749,44 @@ const PodcastPlayer = ({ model, onBack, settings, onGenerate, setNotification, p
                 onSave={settings.setKey}
                 currentKey={settings.key}
             />
+
+            {/* Crop Overlay Modal */}
+            {uploadedMidi && (
+                <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm animate-in fade-in">
+                    <div className="bg-surface border border-border rounded-2xl w-full max-w-5xl h-[80vh] flex flex-col overflow-hidden shadow-2xl">
+                        <div className="p-4 border-b border-border flex justify-between items-center bg-surface/50">
+                            <div>
+                                <h3 className="text-lg font-bold text-white">Crop Uploaded MIDI</h3>
+                                <p className="text-sm text-muted">Select measures to crop. If no selection is made, the entire file will be used.</p>
+                            </div>
+                            <div className="flex items-center gap-3">
+                                <button 
+                                    onClick={() => setUploadedMidi(null)}
+                                    className="px-4 py-2 bg-surface text-text rounded-lg hover:bg-surface/80 transition-colors border border-border text-sm"
+                                >
+                                    Cancel
+                                </button>
+                                <button 
+                                    onClick={handleCropAndStart}
+                                    className="px-6 py-2 bg-primary text-white font-bold rounded-lg hover:bg-primary/80 transition-colors shadow-lg"
+                                >
+                                    Confirm Crop & Start
+                                </button>
+                            </div>
+                        </div>
+                        <div className="flex-1 overflow-hidden relative">
+                            <PianoRoll 
+                                ref={pianoRollRef}
+                                midiData={uploadedMidi}
+                                duration={uploadedMidi.duration}
+                                progress={progress || 0}
+                                onSeek={onSeek}
+                                selectionEnabled={true}
+                            />
+                        </div>
+                    </div>
+                </div>
+            )}
         </div>
     );
 };

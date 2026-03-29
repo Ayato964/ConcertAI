@@ -1142,6 +1142,8 @@ function App() {
                   onStop={handleStop}
                   setNotification={setNotification}
                   onAppendMidi={handleAppendMidi}
+                  progress={progress}
+                  onSeek={handleSeek}
                 />
               )}
             </>
