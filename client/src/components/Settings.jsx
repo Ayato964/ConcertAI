@@ -138,8 +138,9 @@ const Settings = ({ instrument, setInstrument, tempo, setTempo, selectedModel, s
                                         <input
                                             type="range"
                                             min="1"
-                                            max="8"
+                                            max="10"
                                             step="1"
+
                                             value={densities[inst] || 4}
                                             onChange={(e) => handleDensityChange(inst, e.target.value)}
                                             className="w-full h-1.5 bg-surface rounded-lg appearance-none cursor-pointer accent-primary"

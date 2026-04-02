@@ -76,6 +76,7 @@ function App() {
     const fetchModelInfo = async () => {
       try {
         const response = await fetch(`${API_BASE_URL}/model_info`, { method: 'POST' });
+
         if (!response.ok) {
           throw new Error(`Network response was not ok: ${response.statusText}`);
         }
@@ -368,15 +369,28 @@ function App() {
       return null;
     }
 
+    const getProgramFromInstrument = (instName) => {
+      const name = String(instName).toUpperCase();
+      if (name.includes('PIANO')) return 0;
+      if (name.includes('SAX')) return 65;
+      return 0; // Default to Piano
+    };
+
     const modelObject = modelInfo.find(model => model.model_name === targetModelName);
     const modelType = modelObject?.tag?.model;
     const rules = modelObject?.rule || {};
 
     const midi = new Midi();
     const track = midi.addTrack();
+    
+    // Set program based on the first selected instrument if available
+    const primaryInstrument = selectedInstruments[0] || 'PIANO';
+    track.instrument.number = getProgramFromInstrument(primaryInstrument);
+
     targetNotes.forEach(note => {
       track.addNote({ midi: note.midi, time: note.time, duration: note.duration, velocity: note.velocity });
     });
+
 
     const midiBlob = new Blob([midi.toArray()], { type: 'audio/midi' });
 
@@ -384,7 +398,7 @@ function App() {
       model_type: targetModelName,
       program: selectedInstruments,
       tempo: tempo,
-      task: "MUSICGEM",
+      task: "Prompt2MIDI",
       p: p,
       temperature: temperature,
       split_measure: 99,
@@ -423,18 +437,22 @@ function App() {
     const metaBlob = new Blob([JSON.stringify(finalMeta, null, 2)], { type: 'application/json' });
 
     const formData = new FormData();
-    formData.append('midi', midiBlob, 'input.mid');
     formData.append('meta_json', metaBlob, 'meta.json');
+
+    if (customContext?.conditionsMidiBlob) {
+      formData.append('conditions_midi', customContext.conditionsMidiBlob, 'conditions.mid');
+    } else if (targetNotes.length > 0) {
+      const midiBlob = new Blob([midi.toArray()], { type: 'audio/midi' });
+      formData.append('conditions_midi', midiBlob, 'input.mid');
+    }
 
     if (customContext?.pastMidiBlob) {
       formData.append('past_midi', customContext.pastMidiBlob, 'past.mid');
     }
-    if (customContext?.conditionsMidiBlob) {
-      formData.append('conditions_midi', customContext.conditionsMidiBlob, 'conditions.mid');
-    }
     if (customContext?.futureMidiBlob) {
       formData.append('future_midi', customContext.futureMidiBlob, 'future.mid');
     }
+
 
     try {
       const response = await fetch(`${API_BASE_URL}/generate`, { method: 'POST', body: formData });
@@ -519,19 +537,32 @@ function App() {
 
     setGeneratedMidis([]);
 
+    const getProgramFromInstrument = (instName) => {
+      const name = String(instName).toUpperCase();
+      if (name.includes('PIANO')) return 0;
+      if (name.includes('SAX')) return 65;
+      return 0; // Default to Piano
+    };
+
     const midi = new Midi();
     const track = midi.addTrack();
+
+    // Set program based on the first selected instrument if available
+    const primaryInstrument = selectedInstruments[0] || 'PIANO';
+    track.instrument.number = getProgramFromInstrument(primaryInstrument);
+
     notes.forEach(note => {
       track.addNote({ midi: note.midi, time: note.time, duration: note.duration, velocity: note.velocity });
     });
 
-    const midiBlob = new Blob([midi.toArray()], { type: 'audio/midi' });
+    const midiBlob = notes.length > 0 ? new Blob([midi.toArray()], { type: 'audio/midi' }) : null;
+
 
     const meta = {
       model_type: selectedModel,
       program: selectedInstruments,
       tempo: tempo,
-      task: "MUSICGEM",
+      task: "Prompt2MIDI",
       p: p,
       temperature: temperature,
       split_measure: 99,
@@ -592,8 +623,12 @@ function App() {
     const metaBlob = new Blob([JSON.stringify(meta, null, 2)], { type: 'application/json' });
 
     const formData = new FormData();
-    formData.append('midi', midiBlob, 'input.mid');
+    if (midiBlob) {
+      formData.append('conditions_midi', midiBlob, 'input.mid');
+    }
     formData.append('meta_json', metaBlob, 'meta.json');
+
+
 
     // Context Sending Logic
     if (rules.send_context_past) {
@@ -601,12 +636,14 @@ function App() {
       if (pastNotes.length > 0) {
         const pastMidi = new Midi();
         const pastTrack = pastMidi.addTrack();
+        pastTrack.instrument.number = getProgramFromInstrument(primaryInstrument);
         pastNotes.forEach(note => {
           pastTrack.addNote({ midi: note.midi, time: note.time, duration: note.duration, velocity: note.velocity });
         });
         const pastBlob = new Blob([pastMidi.toArray()], { type: 'audio/midi' });
         formData.append('past_midi', pastBlob, 'past.mid');
       }
+
     }
 
     if (rules.send_context_condition) {
@@ -614,12 +651,14 @@ function App() {
       if (notes.length > 0) {
         const conditionMidi = new Midi();
         const conditionTrack = conditionMidi.addTrack();
+        conditionTrack.instrument.number = getProgramFromInstrument(primaryInstrument);
         notes.forEach(note => {
           conditionTrack.addNote({ midi: note.midi, time: note.time, duration: note.duration, velocity: note.velocity });
         });
         const conditionBlob = new Blob([conditionMidi.toArray()], { type: 'audio/midi' });
         formData.append('conditions_midi', conditionBlob, 'conditions.mid');
       }
+
     }
 
     if (rules.send_context_future) {
@@ -627,12 +666,14 @@ function App() {
       if (futureNotes.length > 0) {
         const futureMidi = new Midi();
         const futureTrack = futureMidi.addTrack();
+        futureTrack.instrument.number = getProgramFromInstrument(primaryInstrument);
         futureNotes.forEach(note => {
           futureTrack.addNote({ midi: note.midi, time: note.time, duration: note.duration, velocity: note.velocity });
         });
         const futureBlob = new Blob([futureMidi.toArray()], { type: 'audio/midi' });
         formData.append('future_midi', futureBlob, 'future.mid');
       }
+
     }
 
     try {

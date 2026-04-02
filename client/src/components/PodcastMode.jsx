@@ -297,23 +297,29 @@ const PodcastPlayer = ({ model, onBack, settings, onGenerate, setNotification, p
             const gridDuration = totalMeasures * measureDuration;
             const startTime = Math.max(0, gridDuration - last4MeasuresDuration);
 
+            const getProgramFromInstrument = (instName) => {
+                const name = String(instName).toUpperCase();
+                if (name.includes('PIANO')) return 0;
+                if (name.includes('SAX')) return 65;
+                return 0; // Default to Piano
+            };
+
             const pastMidi = new Midi();
+            const primaryInstrument = settingsRef.current.selectedInstruments?.[0] || 'PIANO';
+            const program = getProgramFromInstrument(primaryInstrument);
 
             if (currentMidi.header) {
                 // Manually copy properties to preserve Header instance methods
                 pastMidi.header.tempos = JSON.parse(JSON.stringify(currentMidi.header.tempos));
                 pastMidi.header.timeSignatures = JSON.parse(JSON.stringify(currentMidi.header.timeSignatures));
-                // ppq is read-only in some versions of Tone.js Midi, so we skip it.
-                // It defaults to 480 usually.
                 pastMidi.header.name = currentMidi.header.name;
-                // If there are other meta events, we might want them, but these are critical for timing.
-                // We do NOT overwrite pastMidi.header itself.
             }
 
             // Extract track data for past_midi context
+            let pastNotesCount = 0;
             currentMidi.tracks.forEach(t => {
                 const track = pastMidi.addTrack();
-                track.instrument = t.instrument;
+                track.instrument.number = program; // Ensure consistent instrument
                 track.channel = t.channel; // Keep channel
                 t.notes.forEach(n => {
                     if (n.time >= startTime) {
@@ -323,11 +329,12 @@ const PodcastPlayer = ({ model, onBack, settings, onGenerate, setNotification, p
                             duration: n.duration,
                             velocity: n.velocity
                         });
+                        pastNotesCount++;
                     }
                 });
             });
 
-            const pastMidiBlob = new Blob([pastMidi.toArray()], { type: 'audio/midi' });
+            const pastMidiBlob = pastNotesCount > 0 ? new Blob([pastMidi.toArray()], { type: 'audio/midi' }) : null;
 
             // Ensure model is still available
             if (!model) {
@@ -336,11 +343,13 @@ const PodcastPlayer = ({ model, onBack, settings, onGenerate, setNotification, p
                 return;
             }
 
+
             // B. Generate extension (8 bars as requested)
             // Using genfield_measure: 8 and generate_count: 8
             setIsGenerating(true);
 
             const overrideMeta = {
+                task: "Prompt2MIDI",
                 ai_continue_mode: true,
                 generate_count: 8,
                 genfield_measure: 8,
@@ -363,6 +372,8 @@ const PodcastPlayer = ({ model, onBack, settings, onGenerate, setNotification, p
                 overrideMeta.genfield_note_dense = densityPayload;
                 overrideMeta.note_density = densityPayload;
             }
+
+
 
             const results = await onGenerate(
                 model.model_name,
@@ -709,8 +720,9 @@ const PodcastPlayer = ({ model, onBack, settings, onGenerate, setNotification, p
                                                 <input
                                                     type="range"
                                                     min="1"
-                                                    max="8"
+                                                    max="10"
                                                     step="1"
+
                                                     value={settings.densities?.[inst] || 4}
                                                     onChange={(e) => {
                                                         const newDensities = { ...(settings.densities || {}), [inst]: parseInt(e.target.value) };
