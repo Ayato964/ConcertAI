@@ -1,16 +1,34 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { ChevronRight, X } from 'lucide-react';
 
-const ModelSelector = ({ selectedModel, setSelectedModel, modelInfo, debugMode }) => {
+const ModelSelector = ({ selectedModel, setSelectedModel, modelInfo, debugMode, selectedTask = "Meta2MIDI" }) => {
     const [drawerOpen, setDrawerOpen] = useState(false);
 
-    const models = useMemo(() => modelInfo ? Object.values(modelInfo) : [], [modelInfo]);
+    const allModels = useMemo(() => modelInfo ? Object.values(modelInfo) : [], [modelInfo]);
+
+    const models = useMemo(() => {
+        if (!selectedTask) return allModels;
+        return allModels.filter(m => {
+            // Check if model supports the selected task
+            const supportedTasks = m.tag?.task;
+            if (Array.isArray(supportedTasks)) {
+                return supportedTasks.includes(selectedTask);
+            } else if (typeof supportedTasks === 'string') {
+                return supportedTasks === selectedTask;
+            }
+            // Fallback for older model_info format
+            return true;
+        });
+    }, [allModels, selectedTask]);
 
     useEffect(() => {
-        if (models.length > 0 && !selectedModel) {
-            setSelectedModel(models[0].model_name);
+        if (models.length > 0) {
+            // Only set if current selected model is not in the filtered list
+            if (!selectedModel || !models.find(m => m.model_name === selectedModel)) {
+                setSelectedModel(models[0].model_name);
+            }
         }
-    }, [models, setSelectedModel]);
+    }, [models, setSelectedModel, selectedModel]);
 
     const handleModelSelect = (modelName) => {
         setSelectedModel(modelName);

@@ -48,6 +48,7 @@ function App() {
   const [key, setKey] = useState('C M');
   const [selectedInstruments, setSelectedInstruments] = useState([]);
   const [densities, setDensities] = useState({});
+  const [selectedTask, setSelectedTask] = useState('Meta2MIDI');
 
   const [modelInfo, setModelInfo] = useState([]);
   const [generatedMidis, setGeneratedMidis] = useState([]);
@@ -60,6 +61,7 @@ function App() {
   const [trackSolos, setTrackSolos] = useState({});
   const [showServiceUnavailableModal, setShowServiceUnavailableModal] = useState(false);
   const [generationRange, setGenerationRange] = useState(null);
+  const [lastTask, setLastTask] = useState('');
 
   const scheduledEventsRef = useRef([]);
   const pianoRollRef = useRef();
@@ -379,6 +381,7 @@ function App() {
     const modelObject = modelInfo.find(model => model.model_name === targetModelName);
     const modelType = modelObject?.tag?.model;
     const rules = modelObject?.rule || {};
+    const useChord = rules.use_chord || rules.send_chord || false;
 
     const midi = new Midi();
     const track = midi.addTrack();
@@ -394,32 +397,46 @@ function App() {
 
     const midiBlob = new Blob([midi.toArray()], { type: 'audio/midi' });
 
+    const chordEntries = Object.entries(targetChords || {});
+    const hasChords = chordEntries.length > 0;
+
     const meta = {
       model_type: targetModelName,
       program: selectedInstruments,
       tempo: tempo,
-      task: "Prompt2MIDI",
+      task: hasChords ? "Chord2MIDI" : "Meta2MIDI",
       p: p,
       temperature: temperature,
       split_measure: 99,
-      key: key.replace(' ', ''),
+      key: key.includes('Major') ? key.replace(' Major', 'M') : key.replace(' Minor', 'm'),
       num_gems: numGems
     };
 
-    if (rules.gen_measure_count && targetRange) {
+    if (hasChords) {
+      const measures = chordEntries.map(([k]) => parseInt(k.split('-')[0]));
+      const minMeasure = Math.min(...measures);
+      const maxMeasure = Math.max(...measures);
+      const measureCount = maxMeasure - minMeasure + 1;
+      meta.generate_count = measureCount;
+      meta.genfield_measure = measureCount;
+    } else if (rules.gen_measure_count && targetRange) {
       const measureCount = targetRange[1] - targetRange[0] + 1;
       meta.generate_count = measureCount;
       meta.genfield_measure = measureCount;
     }
 
-    if (modelType === 'sft' && targetMidiData) {
+    if (useChord || hasChords) {
       const promptEndTime = targetNotes.reduce((max, note) => Math.max(max, note.time + note.duration), 0);
 
-      const bpm = targetMidiData.header.tempos[0]?.bpm || 120;
-      const timeSignature = targetMidiData.header.timeSignatures[0]?.timeSignature || [4, 4];
+      const bpm = targetMidiData?.header.tempos[0]?.bpm || tempo || 120;
+      const timeSignature = targetMidiData?.header.timeSignatures[0]?.timeSignature || [4, 4];
       const beatsPerMeasure = timeSignature[0];
       const secondsPerBeat = 60 / bpm;
       const secondsPerMeasure = secondsPerBeat * beatsPerMeasure;
+
+      const measures = chordEntries.map(([k]) => parseInt(k.split('-')[0]));
+      const minMeasure = measures.length > 0 ? Math.min(...measures) : 0;
+      const rangeStartTime = minMeasure * secondsPerMeasure;
 
       const allChordTimings = Object.entries(targetChords || {}).map(([key, value]) => {
         const [measure, beat] = key.split('-').map(Number);
@@ -427,10 +444,14 @@ function App() {
         return { chord: value, startTime };
       });
 
-      const subsequentChords = allChordTimings.filter(c => c.startTime >= promptEndTime);
-
-      meta.chord_item = subsequentChords.map(c => getChordText(c.chord));
-      meta.chord_times = subsequentChords.map(c => c.startTime - promptEndTime);
+      // For Chord2MIDI, times are relative to the start of the generation range
+      // For Meta2MIDI, they are relative to promptEndTime
+      const referenceTime = meta.task === "Chord2MIDI" ? rangeStartTime : promptEndTime;
+      const filteredChords = allChordTimings.filter(c => c.startTime >= referenceTime);
+      if (filteredChords.length > 0) {
+        meta.chord_item = filteredChords.map(c => getChordText(c.chord));
+        meta.chord_times = filteredChords.map(c => c.startTime - referenceTime);
+      }
     }
 
     const finalMeta = { ...meta, ...overrideMeta };
@@ -525,8 +546,6 @@ function App() {
       return;
     }
 
-
-
     setIsGenerating(true);
     setNotification({ open: true, message: "Generating... Please wait.", severity: 'info' });
 
@@ -536,6 +555,26 @@ function App() {
     }
 
     setGeneratedMidis([]);
+    const chordEntries = Object.entries(chords || {});
+
+    // 1. Determine Effective Range
+    let effectiveRange = selectedRange;
+    if (!hasSelection && chordEntries.length > 0) {
+      const measures = chordEntries.map(([k]) => parseInt(k.split('-')[0]));
+      effectiveRange = [Math.min(...measures), Math.max(...measures)];
+    } else if (!hasSelection) {
+      effectiveRange = [0, 7]; // Default
+    }
+
+    const measureCount = (effectiveRange[1] - effectiveRange[0] + 1);
+    setGenerationRange(effectiveRange);
+
+    const bpm = originalMidi?.header.tempos[0]?.bpm || tempo || 120;
+    const timeSignature = originalMidi?.header.timeSignatures[0]?.timeSignature || [4, 4];
+    const beatsPerMeasure = timeSignature[0];
+    const secondsPerBeat = 60 / bpm;
+    const secondsPerMeasure = secondsPerBeat * beatsPerMeasure;
+    const selectionStartTime = effectiveRange[0] * secondsPerMeasure;
 
     const getProgramFromInstrument = (instName) => {
       const name = String(instName).toUpperCase();
@@ -545,9 +584,8 @@ function App() {
     };
 
     const midi = new Midi();
+    midi.header.setTempo(bpm);
     const track = midi.addTrack();
-
-    // Set program based on the first selected instrument if available
     const primaryInstrument = selectedInstruments[0] || 'PIANO';
     track.instrument.number = getProgramFromInstrument(primaryInstrument);
 
@@ -557,66 +595,91 @@ function App() {
 
     const midiBlob = notes.length > 0 ? new Blob([midi.toArray()], { type: 'audio/midi' }) : null;
 
+    // 2. Resolve Chords for this range (with carry-over)
+    const allChordTimings = Object.entries(chords || {}).map(([key, value]) => {
+      const [measure, beat] = key.split('-').map(Number);
+      const startTime = (measure * secondsPerMeasure) + (beat * secondsPerBeat);
+      return { chord: value, startTime };
+    }).sort((a, b) => a.startTime - b.startTime);
+
+    const chordsInRange = allChordTimings.filter(c => c.startTime >= selectionStartTime);
+    const chordsBeforeRange = allChordTimings.filter(c => c.startTime < selectionStartTime);
+
+    let finalChords = [];
+    if (chordsInRange.length > 0) {
+      if (chordsInRange[0].startTime > selectionStartTime && chordsBeforeRange.length > 0) {
+        finalChords.push({ ...chordsBeforeRange[chordsBeforeRange.length - 1], startTime: selectionStartTime });
+      }
+      finalChords = [...finalChords, ...chordsInRange];
+    } else if (chordsBeforeRange.length > 0) {
+      finalChords.push({ ...chordsBeforeRange[chordsBeforeRange.length - 1], startTime: selectionStartTime });
+    }
+
+    const currentTask = finalChords.length > 0 ? "Chord2MIDI" : "Meta2MIDI";
+    setLastTask(currentTask);
+
+    // Key formatting: "C M" -> "CM", "A Major" -> "AM", "B Minor" -> "Bm"
+    const formattedKey = key
+      .replace(' Major', 'M')
+      .replace(' Minor', 'm')
+      .replace(' M', 'M')
+      .replace(' m', 'm')
+      .replace(' ', '');
 
     const meta = {
       model_type: selectedModel,
       program: selectedInstruments,
       tempo: tempo,
-      task: "Prompt2MIDI",
+      task: currentTask,
       p: p,
       temperature: temperature,
       split_measure: 99,
-      key: key.replace(' ', ''),
-      num_gems: numGems
+      key: formattedKey,
+      num_gems: numGems,
+      genfield_measure: Math.min(64, measureCount)
     };
 
     if (rules.gen_note_dense) {
-      // Filter densities to only include selected instruments
       const densityPayload = {};
-      selectedInstruments.forEach(inst => {
-        if (densities[inst]) {
-          densityPayload[inst] = densities[inst];
-        }
-      });
+      selectedInstruments.forEach(inst => { if (densities[inst]) densityPayload[inst] = densities[inst]; });
       meta.gen_note_dense = densityPayload;
-      // Adding fallback keys based on user feedback and code patterns
-      meta.genfield_note_dense = densityPayload;
       meta.note_density = densityPayload;
     }
 
-    if (rules.gen_measure_count && hasSelection) {
-      const measureCount = selectedRange[1] - selectedRange[0] + 1;
-      meta.generate_count = measureCount;
-      meta.genfield_measure = measureCount;
-      setGenerationRange(selectedRange);
-    } else {
-      setGenerationRange(null);
-    }
-
-    if (modelType === 'sft' && originalMidi) {
-      const promptEndTime = notes.reduce((max, note) => Math.max(max, note.time + note.duration), 0);
-
-      const bpm = originalMidi?.header.tempos[0]?.bpm || 120;
-      const timeSignature = originalMidi?.header.timeSignatures[0]?.timeSignature || [4, 4];
-      const beatsPerMeasure = timeSignature[0];
-      const secondsPerBeat = 60 / bpm;
-      const secondsPerMeasure = secondsPerBeat * beatsPerMeasure;
-
-      const allChordTimings = Object.entries(chords).map(([key, value]) => {
-        const [measure, beat] = key.split('-').map(Number);
-        const startTime = (measure * secondsPerMeasure) + (beat * secondsPerBeat);
-        return { chord: value, startTime };
-      });
-
-      const subsequentChords = allChordTimings.filter(c => c.startTime >= promptEndTime);
-
-      meta.chord_item = subsequentChords.map(c => getChordText(c.chord));
-      meta.chord_times = subsequentChords.map(c => c.startTime - promptEndTime);
+    if (currentTask === "Chord2MIDI") {
+      meta.chord_item = finalChords.map(c => getChordText(c.chord));
+      meta.chord_times = finalChords.map(c => c.startTime);
+    } else if (rules.use_chord || rules.send_chord) {
+      const promptEndTime = notes.length > 0 ? notes.reduce((max, note) => Math.max(max, note.time + note.duration), 0) : 0;
+      const metaFilteredChords = allChordTimings.filter(c => c.startTime >= promptEndTime);
+      if (metaFilteredChords.length > 0) {
+        meta.chord_item = metaFilteredChords.map(c => getChordText(c.chord));
+        meta.chord_times = metaFilteredChords.map(c => c.startTime);
+      }
     }
 
     if (debugMode) {
       setDebugInfo({ meta });
     }
+
+    // Detailed Generation Log for debugging
+    console.group("🚀 Generation Request Debug Information");
+    console.log("Selected Model:", selectedModel);
+    console.log("Task Type:", currentTask);
+    console.log("Applied Range (Measures):", effectiveRange);
+    console.log("Measure Count:", measureCount);
+    console.log("Selection Start Time (sec):", selectionStartTime);
+    console.log("Metadata Payload:", meta);
+    if (meta.chord_item) {
+      console.log("--- Chord Progression Details ---");
+      console.table(meta.chord_item.map((chord, i) => ({
+        index: i,
+        chord: chord,
+        offset_time: meta.chord_times[i].toFixed(3) + "s"
+      })));
+    }
+    console.log("Form Data - MIDI present:", !!midiBlob);
+    console.groupEnd();
 
     console.log('Sending Generation Request with Meta:', meta);
 
@@ -635,6 +698,7 @@ function App() {
       const pastNotes = pianoRollRef.current?.getPastNotes(8) || [];
       if (pastNotes.length > 0) {
         const pastMidi = new Midi();
+        pastMidi.header.setTempo(bpm);
         const pastTrack = pastMidi.addTrack();
         pastTrack.instrument.number = getProgramFromInstrument(primaryInstrument);
         pastNotes.forEach(note => {
@@ -650,6 +714,7 @@ function App() {
       // Condition is essentially the selected notes, but sent as a separate file
       if (notes.length > 0) {
         const conditionMidi = new Midi();
+        conditionMidi.header.setTempo(bpm);
         const conditionTrack = conditionMidi.addTrack();
         conditionTrack.instrument.number = getProgramFromInstrument(primaryInstrument);
         notes.forEach(note => {
@@ -665,6 +730,7 @@ function App() {
       const futureNotes = pianoRollRef.current?.getFutureNotes(8) || [];
       if (futureNotes.length > 0) {
         const futureMidi = new Midi();
+        futureMidi.header.setTempo(bpm);
         const futureTrack = futureMidi.addTrack();
         futureTrack.instrument.number = getProgramFromInstrument(primaryInstrument);
         futureNotes.forEach(note => {
@@ -764,11 +830,113 @@ function App() {
     // For sft, we need originalMidi to combine.
 
 
-    if (modelType === 'pretrained') {
+    if (modelType === 'pretrained' && lastTask !== 'Chord2MIDI') {
       setMidiData(generatedMidi);
-    } else if (modelType === 'sft') {
+    } else if (lastTask === 'Chord2MIDI' || (generationRange && originalMidi)) {
+      // Merge logic for Chord2MIDI or Range-based generation
+      const targetTrackIndex = pianoRollRef.current?.getSelectedTrackIndex() || 0;
+      const bpm = originalMidi?.header.tempos[0]?.bpm || tempo || 120;
+      const timeSignature = originalMidi?.header.timeSignatures[0]?.timeSignature || [4, 4];
+      const secondsPerMeasure = (60 / bpm) * timeSignature[0];
+
+      const selectionStartTime = generationRange[0] * secondsPerMeasure;
+      const selectionEndTime = (generationRange[1] + 1) * secondsPerMeasure;
+
+      // Smart Offset Decision
+      const allReceivedNotes = generatedMidi.tracks.flatMap(t => t.notes).sort((a, b) => a.time - b.time);
+      const firstNoteTime = allReceivedNotes.length > 0 ? allReceivedNotes[0].time : 0;
+
+      // If the result starts significantly before the selection (e.g. at 0.0 while selection is at 2.0+),
+      // we assume it needs offsetting. If it's already around or after selectionStartTime, we use it as is.
+      const needsOffset = firstNoteTime < (selectionStartTime - 0.1);
+      const offsetToApply = needsOffset ? selectionStartTime : 0;
+
+      console.group("🔍 MIDI Merge Debug Information");
+      console.log("Selection Start Time (sec):", selectionStartTime.toFixed(3) + "s");
+      console.log("First Received Note Time (Raw):", firstNoteTime.toFixed(3) + "s");
+      console.log("Offset being applied:", offsetToApply.toFixed(3) + "s");
+      console.groupEnd();
+
       const newMidi = new Midi();
-      newMidi.header = originalMidi.header;
+      // Use setTempo instead of overwriting the header object
+      if (originalMidi && originalMidi.header && originalMidi.header.tempos[0]) {
+        newMidi.header.setTempo(originalMidi.header.tempos[0].bpm);
+        newMidi.header.name = originalMidi.header.name;
+      } else {
+        newMidi.header.setTempo(bpm);
+      }
+
+      const tracksToProcess = originalMidi ? originalMidi.tracks : [null];
+
+      tracksToProcess.forEach((track, index) => {
+        const newTrack = newMidi.addTrack();
+        if (track) {
+          newTrack.instrument.number = track.instrument.number;
+          newTrack.name = track.name;
+          newTrack.channel = track.channel;
+        }
+
+        if (index === targetTrackIndex) {
+          // 1. Add notes BEFORE selection from original
+          if (track && track.notes) {
+            track.notes.forEach(note => {
+              if (note.time < selectionStartTime) {
+                newTrack.addNote({
+                  midi: note.midi,
+                  time: note.time,
+                  duration: note.duration,
+                  velocity: note.velocity
+                });
+              }
+            });
+          }
+
+          // 2. Add GENERATED notes
+          generatedMidi.tracks.forEach(genTrack => {
+            genTrack.notes.forEach(note => {
+              newTrack.addNote({
+                midi: note.midi,
+                time: note.time + offsetToApply,
+                duration: note.duration,
+                velocity: note.velocity
+              });
+            });
+          });
+
+          // 3. Add notes AFTER selection from original
+          if (track && track.notes) {
+            track.notes.forEach(note => {
+              if (note.time >= selectionEndTime) {
+                newTrack.addNote({
+                  midi: note.midi,
+                  time: note.time,
+                  duration: note.duration,
+                  velocity: note.velocity
+                });
+              }
+            });
+          }
+        } else if (track) {
+          // Just copy other tracks
+          if (track.notes) {
+            track.notes.forEach(note => {
+              newTrack.addNote({
+                midi: note.midi,
+                time: note.time,
+                duration: note.duration,
+                velocity: note.velocity
+              });
+            });
+          }
+        }
+      });
+      setMidiData(newMidi);
+    } else if (modelObject?.rule?.use_chord || modelObject?.rule?.send_chord || modelType === 'sft') {
+      const newMidi = new Midi();
+      if (originalMidi && originalMidi.header && originalMidi.header.tempos[0]) {
+        newMidi.header.setTempo(originalMidi.header.tempos[0].bpm);
+        newMidi.header.name = originalMidi.header.name;
+      }
 
       const promptNotes = pianoRollRef.current.getSelectedNotes();
       const promptEndTime = promptNotes.reduce((max, note) => Math.max(max, note.time + note.duration), 0);
@@ -776,105 +944,29 @@ function App() {
       const track = newMidi.addTrack();
 
       originalMidi.tracks.forEach((originalTrack, index) => {
-        if (trackMutes[index]) return; // Skip muted tracks in generation prompt
+        if (trackMutes[index]) return;
 
         originalTrack.notes.forEach(note => {
           if (note.time < promptEndTime) {
-            track.addNote(note);
+            track.addNote({
+              midi: note.midi,
+              time: note.time,
+              duration: note.duration,
+              velocity: note.velocity
+            });
           }
         });
       });
 
       generatedMidi.tracks.forEach(generatedTrack => {
         generatedTrack.notes.forEach(note => {
-          track.addNote({ ...note, time: note.time + promptEndTime });
+          track.addNote({
+            midi: note.midi,
+            time: note.time + promptEndTime,
+            duration: note.duration,
+            velocity: note.velocity
+          });
         });
-      });
-      setMidiData(newMidi);
-    } else if (generationRange && originalMidi) {
-      // Merge logic for gen_measure_count
-      const targetTrackIndex = pianoRollRef.current?.getSelectedTrackIndex() || 0;
-      const bpm = originalMidi.header.tempos[0]?.bpm || 120;
-      const timeSignature = originalMidi.header.timeSignatures[0]?.timeSignature || [4, 4];
-      const secondsPerMeasure = (60 / bpm) * timeSignature[0];
-
-      const selectionStartTime = generationRange[0] * secondsPerMeasure;
-      const selectionEndTime = (generationRange[1] + 1) * secondsPerMeasure;
-
-      // Start merging from 1 measure before selection (if possible)
-      const mergeStartMeasure = Math.max(0, generationRange[0] - 1);
-      const mergeStartTime = mergeStartMeasure * secondsPerMeasure;
-
-      const newMidi = new Midi();
-      newMidi.header = originalMidi.header;
-
-      originalMidi.tracks.forEach((track, index) => {
-        const newTrack = newMidi.addTrack();
-        // Copy track info
-        newTrack.instrument = track.instrument;
-        newTrack.name = track.name;
-        newTrack.channel = track.channel;
-
-        if (index === targetTrackIndex) {
-          // This is the track to merge into
-          // 1. Add notes before selection (Original MIDI)
-          // We strictly keep original MIDI before the selection start time.
-          track.notes.forEach(note => {
-            if (note.time < selectionStartTime) {
-              newTrack.addNote({
-                midi: note.midi,
-                time: note.time,
-                duration: note.duration,
-                velocity: note.velocity
-              });
-            }
-          });
-
-          // 2. Add generated notes
-          // Shift them based on mergeStartTime (1 measure before selection),
-          // BUT only include them if they fall within the selection range (or after).
-          // The user requested: "Do not overwrite the part 1 measure before... overwrite the selection range".
-          generatedMidi.tracks.forEach(genTrack => {
-            genTrack.notes.forEach(note => {
-              const newTime = note.time + mergeStartTime;
-              if (newTime >= selectionStartTime) {
-                newTrack.addNote({
-                  midi: note.midi,
-                  time: newTime,
-                  duration: note.duration,
-                  velocity: note.velocity
-                });
-              }
-            });
-          });
-
-          // 3. Add notes after selection (Original MIDI)
-          // Note: If the generated content goes beyond selectionEndTime, we might have overlap/double notes
-          // if we also keep original notes.
-          // Usually "overwrite selection range" implies we keep original after selectionEndTime.
-          // If generated content is longer, it might overlap.
-          // For now, assuming we keep original after selectionEndTime.
-          track.notes.forEach(note => {
-            if (note.time >= selectionEndTime) {
-              newTrack.addNote({
-                midi: note.midi,
-                time: note.time,
-                duration: note.duration,
-                velocity: note.velocity
-              });
-            }
-          });
-        } else {
-          // Just copy other tracks
-          track.notes.forEach(note => {
-            newTrack.addNote({
-              midi: note.midi,
-              time: note.time,
-              duration: note.duration,
-              velocity: note.velocity
-            });
-          });
-        }
       });
       setMidiData(newMidi);
     }
@@ -941,6 +1033,7 @@ function App() {
     setInstruments([]);
     setTrackMutes({});
     setTrackSolos({});
+    setChords({});
     handleStop();
   };
 
@@ -1017,6 +1110,7 @@ function App() {
                         setSelectedInstruments={setSelectedInstruments}
                         densities={densities}
                         setDensities={setDensities}
+                        selectedTask={selectedTask}
                       />
                       <AdvancedSettings
                         temperature={temperature}
@@ -1074,6 +1168,8 @@ function App() {
                           trackMutes={trackMutes}
                           trackSolos={trackSolos}
                           selectionEnabled={modelInfo.find(m => m.model_name === selectedModel)?.rule?.gen_measure_count === true}
+                          useChord={modelInfo.find(m => m.model_name === selectedModel)?.rule?.use_chord === true || modelInfo.find(m => m.model_name === selectedModel)?.rule?.send_chord === true}
+                          chords={chords}
                         />
                       ) : (
                         <div className="h-full p-6">
@@ -1124,6 +1220,8 @@ function App() {
                                   trackMutes={trackMutes}
                                   trackSolos={trackSolos}
                                   selectionEnabled={selectionEnabled}
+                                  useChord={currentModel?.rule?.use_chord === true || currentModel?.rule?.send_chord === true}
+                                  chords={chords}
                                 />
                               );
                             }
@@ -1142,6 +1240,7 @@ function App() {
                   modelInfo={modelInfo}
                   midiData={midiData}
                   setMidiData={setMidiData}
+                  selectedTask={selectedTask}
                   pianoRollProps={{
                     midiData,
                     setMidiData,

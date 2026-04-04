@@ -29,18 +29,11 @@ const NoteBar = ({ note, pixelsPerSecond, verticalZoom }) => {
     );
 };
 
-const PianoRoll = forwardRef(({ midiData, progress, duration, generationLength, setGenerationLength, onSeek, onChordsChange, onMute, onSolo, onDelete, onClear, trackMutes, trackSolos, selectionEnabled = true }, ref) => {
+const PianoRoll = forwardRef(({ midiData, progress, duration, generationLength, setGenerationLength, onSeek, onChordsChange, onMute, onSolo, onDelete, onClear, trackMutes, trackSolos, selectionEnabled = true, useChord = false, chords = {} }, ref) => {
     const [selectedMeasures, setSelectedMeasures] = useState([0, 0]);
     const [horizontalZoom, setHorizontalZoom] = useState(1);
     const [verticalZoom, setVerticalZoom] = useState(1);
-    const [chords, setChords] = useState({});
     const [selectedTrackIndex, setSelectedTrackIndex] = useState(0);
-
-    useEffect(() => {
-        if (onChordsChange) {
-            onChordsChange(chords);
-        }
-    }, [chords, onChordsChange]);
 
     // Reset selected track when midiData changes
     useEffect(() => {
@@ -314,16 +307,18 @@ const PianoRoll = forwardRef(({ midiData, progress, duration, generationLength, 
                 </div>
 
                 {/* Sticky Chord Progression */}
-                <div
-                    className="sticky top-[30px] left-0 z-20 bg-background border-b border-border"
-                    style={{ width: `${contentWidth}px` }}
-                >
-                    <ChordProgression
-                        totalMeasures={totalMeasures}
-                        pixelsPerMeasure={pixelsPerMeasure}
-                        onChordsChange={setChords}
-                    />
-                </div>
+                {useChord && (
+                    <div
+                        className="sticky top-[30px] left-0 z-20 bg-background border-b border-border"
+                        style={{ width: `${contentWidth}px` }}
+                    >
+                        <ChordProgression
+                            totalMeasures={totalMeasures}
+                            pixelsPerMeasure={pixelsPerMeasure}
+                            onChordsChange={onChordsChange}
+                        />
+                    </div>
+                )}
 
                 <div
                     onClick={handleContainerClick}

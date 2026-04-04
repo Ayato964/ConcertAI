@@ -3,7 +3,7 @@ import { ChevronDown, ChevronUp, Settings as SettingsIcon, Music } from 'lucide-
 import ModelSelector from './ModelSelector';
 import KeySelector from './KeySelector';
 
-const Settings = ({ instrument, setInstrument, tempo, setTempo, selectedModel, setSelectedModel, modelInfo, debugMode, keySelection, setKey, selectedInstruments, setSelectedInstruments, densities, setDensities }) => {
+const Settings = ({ instrument, setInstrument, tempo, setTempo, selectedModel, setSelectedModel, modelInfo, debugMode, keySelection, setKey, selectedInstruments, setSelectedInstruments, densities, setDensities, selectedTask = "Meta2MIDI" }) => {
     const [isOpen, setIsOpen] = useState(true);
     const [keySelectorOpen, setKeySelectorOpen] = useState(false);
 
@@ -79,7 +79,7 @@ const Settings = ({ instrument, setInstrument, tempo, setTempo, selectedModel, s
 
             {isOpen && (
                 <div className="p-4 space-y-4 border-t border-border">
-                    <ModelSelector selectedModel={selectedModel} setSelectedModel={setSelectedModel} modelInfo={modelInfo} debugMode={debugMode} />
+                    <ModelSelector selectedModel={selectedModel} setSelectedModel={setSelectedModel} modelInfo={modelInfo} debugMode={debugMode} selectedTask={selectedTask} />
 
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                         <div className="space-y-1.5">

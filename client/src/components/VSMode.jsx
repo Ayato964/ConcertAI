@@ -20,7 +20,8 @@ const VSMode = ({
     playbackState,
     onPlay,
     onPause,
-    onStop
+    onStop,
+    selectedTask = "Meta2MIDI"
 }) => {
     const [step, setStep] = useState(1);
     const [model1, setModel1] = useState(null);
@@ -32,6 +33,21 @@ const VSMode = ({
 
     const pianoRoll1Ref = React.useRef(null);
     const pianoRoll2Ref = React.useRef(null);
+
+    // Filter models based on task
+    const allModels = useMemo(() => modelInfo ? Object.values(modelInfo) : [], [modelInfo]);
+    const taskModels = useMemo(() => {
+        if (!selectedTask) return allModels;
+        return allModels.filter(m => {
+            const supportedTasks = m.tag?.task;
+            if (Array.isArray(supportedTasks)) {
+                return supportedTasks.includes(selectedTask);
+            } else if (typeof supportedTasks === 'string') {
+                return supportedTasks === selectedTask;
+            }
+            return true;
+        });
+    }, [allModels, selectedTask]);
 
     // Store base midi data when step 3 starts or models are selected
     // This ensures that when we play a specific result (updating global midiData),
@@ -108,10 +124,10 @@ const VSMode = ({
     };
 
     // Filter models for step 2
-    const filteredModels = useMemo(() => {
-        if (!model1 || !modelInfo) return [];
-        return modelInfo.filter(m => m.tag?.model === model1.tag?.model && m.model_name !== model1.model_name);
-    }, [model1, modelInfo]);
+    const comparisonModels = useMemo(() => {
+        if (!model1 || !taskModels) return [];
+        return taskModels.filter(m => m.model_name !== model1.model_name);
+    }, [model1, taskModels]);
 
     const handleModel1Select = (model) => {
         setModel1(model);
@@ -138,7 +154,7 @@ const VSMode = ({
     if (step === 1) {
         return (
             <ModelGridSelector
-                models={modelInfo || []}
+                models={taskModels}
                 onSelect={handleModel1Select}
                 title="Select Model 1 (Base)"
                 selectedModelId={model1?.model_name}
@@ -157,7 +173,7 @@ const VSMode = ({
                     <span className="text-sm font-medium">Model 1: <span className="text-primary">{model1?.model_name}</span></span>
                 </div>
                 <ModelGridSelector
-                    models={filteredModels}
+                    models={comparisonModels}
                     onSelect={handleModel2Select}
                     title={`Select Model 2 (Vs ${model1?.model_name})`}
                     selectedModelId={model2?.model_name}
@@ -208,6 +224,8 @@ const VSMode = ({
                                 midiData={result1 || baseMidiRef.current || midiData} // Use baseMidiRef first
                                 selectionEnabled={true}
                                 onChordsChange={setChords}
+                                useChord={model1?.rule?.use_chord === true || model1?.rule?.send_chord === true}
+                                chords={chords}
                             />
                         </div>
                     </div>
@@ -230,6 +248,8 @@ const VSMode = ({
                                 {...pianoRollProps}
                                 midiData={result2 || baseMidiRef.current || midiData}
                                 selectionEnabled={true}
+                                useChord={model2?.rule?.use_chord === true || model2?.rule?.send_chord === true}
+                                chords={chords}
                             />
                         </div>
                     </div>

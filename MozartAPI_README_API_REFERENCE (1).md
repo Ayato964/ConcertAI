@@ -10,6 +10,23 @@
 
 ---
 
+## 1. 概要
+
+- **Base URL**: `http://<host>:8000`
+- **認証**: なし
+- **レスポンス形式**:
+  - モデル一覧: JSON
+  - 生成結果:
+    - 単一 MIDI: バイナリ (`audio/midi`)
+    - 複数 MIDI: ZIP (`application/zip`)
+    - JSON 系タスク: JSON
+- **CORS 許可 Origin**:
+  - `http://localhost`
+  - `http://localhost:3000`
+  - `http://localhost:8080`
+  - `https://ayato964.github.io`
+
+---
 
 ## 2. エンドポイント一覧
 
@@ -91,8 +108,7 @@ Body なし。
 {
   "model_type": "MORTM4.5D-Lite",
   "program": ["PIANO"],
-  "tempo": 120,
-  "task": "Prompt2MIDI",
+  "task": "Meta2MIDI",
   "key": "CM",
   "num_gems": 1,
   "genfield_measure": 8,
@@ -126,13 +142,11 @@ Body なし。
   0 より大きい必要があります。
 
 - `task: string`  
-  対応エイリアス:
-  - `Prompt2MIDI`
-  - `generate` → `Prompt2MIDI`
-  - `melodygen` → `Prompt2MIDI`
+  推奨タスク名 (対応エイリアス):
+  - `Meta2MIDI` (旧: `Prompt2MIDI`, `generate`, `melodygen`)
+  - `MIDI2Meta` (旧: `MetaGen`)
   - `Chord2MIDI`
   - `MIDI2Chord`
-  - `MetaGen`
 
 - `key: string | null`  
   例: `CM`, `Am`
@@ -179,13 +193,13 @@ Body なし。
 
 ## 4. タスク仕様
 
-### 4.1 `Prompt2MIDI`
+### 4.1 `Meta2MIDI`
 
 メタ情報から旋律を生成します。最も基本的な経路です。
 
 #### 最低要件
 
-- `task = "Prompt2MIDI"`
+- `task = "Meta2MIDI"`
 - `program`
 - `tempo`
 
@@ -202,26 +216,50 @@ Body なし。
 - `num_gems > 1` → `.zip`
 
 ---
-
 ### 4.2 `Chord2MIDI`
 
-コード進行を条件に旋律を生成します。
+コード進行を条件として旋律を生成します。
 
-#### 最低要件
+#### 共通必須メタ情報
+
+- `model_type`
+- `program`
+- `tempo`
+
+#### タスク必須項目
 
 - `task = "Chord2MIDI"`
 - `chord_item`
 - `chord_times`
 
-#### 任意条件
+#### 任意項目
 
 - `past_midi`
 - `conditions_midi`
 - `future_midi`
+- `key`
+- `genfield_measure`
+- `gen_note_dense`
+- `num_gems`
+- `p`
+- `temperature`
+
+#### 仕様上の注意
+
+- `Chord2MIDI` は、実際には **コード進行のみ** ではなく、  
+  **SYSTEMメタ情報 + コード進行** を入力として生成を行います。
+- `future_midi` を指定しない通常生成では、`genfield_measure` が
+  `<GEN_MEASURE_COUNT_n>` としてモデル入力に含まれます。
+- `future_midi` を指定する場合は、生成長は未来文脈によって拘束されるため、
+  `<GEN_MEASURE_COUNT_n>` は入力に含まれません。
+- `gen_note_dense` は `Chord2MIDI` でも system prompt に含まれます。
+- `conditions_midi` はコード進行の代替ではなく、追加の旋律条件です。
+  `chord_item` / `chord_times` は省略できません。
 
 #### 出力
 
-- MIDI または ZIP
+- 生成結果が1件のとき: MIDI
+- 複数件のとき: ZIP
 
 ---
 
@@ -259,13 +297,13 @@ Body なし。
 
 ---
 
-### 4.4 `MetaGen`
+### 4.4 `MIDI2Meta`
 
 入力 MIDI からメタ情報を推定します。
 
 #### 最低要件
 
-- `task = "MetaGen"`
+- `task = "MIDI2Meta"`
 - `conditions_midi`
 
 #### 禁止条件
@@ -303,22 +341,22 @@ Body なし。
 
 対応:
 
-- `Prompt2MIDI`
+- `Meta2MIDI`
 - `Chord2MIDI`
 - `MIDI2Chord`
-- `MetaGen`
+- `MIDI2Meta`
 
 ### `tag.model == "generation"`
 
 対応:
 
-- `Prompt2MIDI`
+- `Meta2MIDI`
 - `Chord2MIDI`
 
 非対応:
 
 - `MIDI2Chord`
-- `MetaGen`
+- `MIDI2Meta`
 
 ---
 
@@ -422,7 +460,7 @@ curl -X POST "http://localhost:8000/generate" \
   "model_type": "MORTM4.5D-Lite",
   "program": ["PIANO"],
   "tempo": 120,
-  "task": "Prompt2MIDI",
+  "task": "Meta2MIDI",
   "key": "CM",
   "genfield_measure": 8,
   "gen_note_dense": {"PIANO": 4},
@@ -453,7 +491,7 @@ curl -X POST "http://localhost:8000/generate" \
 ```bash
 curl -X POST "http://localhost:8000/generate" \
   -F "conditions_midi=@input.mid" \
-  -F "meta_json=@meta_metagen.json;type=application/json"
+  -F "meta_json=@meta_midi2meta.json;type=application/json"
 ```
 
 ---
