@@ -40,6 +40,10 @@ const VSMode = ({
         if (!selectedTask) return allModels;
         return allModels.filter(m => {
             const supportedTasks = m.tag?.task;
+            const modelType = m.tag?.model;
+            if (selectedTask === 'Meta2MIDI' && (modelType === 'sft_gen' || modelType === 'sft' || modelType === 'foundation')) {
+                return true;
+            }
             if (Array.isArray(supportedTasks)) {
                 return supportedTasks.includes(selectedTask);
             } else if (typeof supportedTasks === 'string') {
@@ -268,6 +272,11 @@ const VSMode = ({
                                     numGems={settings.numGems}
                                     setNumGems={settings.setNumGems}
                                     rules={model1?.rule}
+                                    thinking={settings.thinking}
+                                    setThinking={settings.setThinking}
+                                    cotTemperature={settings.cotTemperature}
+                                    setCotTemperature={settings.setCotTemperature}
+                                    isSft={model1?.tag?.model === 'sft_gen' || model1?.tag?.model === 'sft'}
                                 />
                             </div>
                         )}

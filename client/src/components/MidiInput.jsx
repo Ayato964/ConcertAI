@@ -2,7 +2,7 @@ import React from 'react';
 import { Midi } from '@tonejs/midi';
 import { Upload, Music } from 'lucide-react';
 
-const MidiInput = ({ onMidiUpload }) => {
+const MidiInput = ({ onMidiUpload, isSft, onGenerateClick }) => {
     const processFile = async (file) => {
         if (!file) return;
         try {
@@ -56,10 +56,22 @@ const MidiInput = ({ onMidiUpload }) => {
                             <span>Select File</span>
                         </div>
                     </label>
-                    <span className="text-sm text-muted font-medium">OR</span>
-                    <button className="btn-secondary flex-1 py-3">
-                        Sample
-                    </button>
+                    {isSft ? (
+                        <button
+                            type="button"
+                            onClick={onGenerateClick}
+                            className="flex-1 btn-premium py-3 font-semibold text-white bg-gradient-to-r from-purple-600 to-indigo-600 rounded-lg shadow-md hover:from-purple-700 hover:to-indigo-700 hover:shadow-purple-500/25 active:scale-[0.98] transition-all flex items-center justify-center gap-2"
+                        >
+                            <span>Generate</span>
+                        </button>
+                    ) : (
+                        <>
+                            <span className="text-sm text-muted font-medium">OR</span>
+                            <button className="btn-secondary flex-1 py-3">
+                                Sample
+                            </button>
+                        </>
+                    )}
                 </div>
             </div>
         </div>

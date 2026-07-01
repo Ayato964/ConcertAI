@@ -79,7 +79,10 @@ app.post('/generate', upload.fields([
     const response = await fetch(GENERATE_API_URL, {
       method: 'POST',
       body: formData,
-      headers: formData.getHeaders(),
+      headers: {
+        ...formData.getHeaders(),
+        'ngrok-skip-browser-warning': '1'
+      },
     });
 
     if (!response.ok) {
@@ -89,8 +92,17 @@ app.post('/generate', upload.fields([
       return res.status(response.status).send(errorBody);
     }
 
-    res.setHeader('Content-Type', response.headers.get('content-type'));
-    res.setHeader('Content-Disposition', response.headers.get('content-disposition'));
+    const contentType = response.headers.get('content-type');
+    if (contentType) res.setHeader('Content-Type', contentType);
+
+    const contentDisposition = response.headers.get('content-disposition');
+    if (contentDisposition) res.setHeader('Content-Disposition', contentDisposition);
+
+    const reasonHeader = response.headers.get('x-generation-reason');
+    if (reasonHeader) {
+      res.setHeader('X-Generation-Reason', reasonHeader);
+    }
+    res.setHeader('Access-Control-Expose-Headers', 'Content-Disposition, X-Generation-Reason');
 
     // Pipe the response and clean up files only after it has finished.
     response.body.pipe(res).on('finish', cleanup);
@@ -104,16 +116,93 @@ app.post('/generate', upload.fields([
 
 const modelInfo = {
   "0": {
-    "model_name": "MORTM4.1Pro-SAX",
-    "description": "マルチタスクに対応した万能モデル。サックスのみに対応",
-    "tag": { "instrument": "sax", "model": "sft", "type": "mortm", "version": "4.1" },
-    "model_folder_path": "C:\\Users\\Nagoshi Takaaki.KTHRLab\\PycharmProjects\\MORTM_API2..."
+    "model_name": "MORTM4.5-Flash-Preview",
+    "description": "ピアノやサックスを含む多様な楽器の演奏に対応したMORTM4.5モデルの軽量版です。高速な生成を実現しています。",
+    "tag": {
+      "instruments": ["PIANO", "SAX"],
+      "task": ["Meta2MIDI"],
+      "model": "pretrained",
+      "type": "mortm",
+      "version": "4.5"
+    },
+    "rule": {
+      "input_midi": false,
+      "multi_instrument": true,
+      "temperature": true,
+      "top_p": true,
+      "number_of_generation": true,
+      "send_context_past": false,
+      "send_context_condition": false,
+      "send_context_future": false,
+      "send_chord_progression": false,
+      "gen_measure_count": false,
+      "gen_note_dense": true,
+      "send_chord": false
+    },
+    "model_folder_path": "/home/takaaki-nagoshi/PycharmProjects/MORTM_API2/data/models/MORTM45_Flash"
   },
   "1": {
-    "model_name": "MORTM4.1-SAX",
-    "description": "旋律生成タスクのみのPre-Trainedモデル。サックスのみに対応",
-    "tag": { "instrument": "sax", "model": "pretrained", "type": "mortm", "version": "4.1" },
-    "model_folder_path": "C:\\Users\\Nagoshi Takaaki.KTHRLab\\PycharmProjects\\MORTM_API2\\data\\models\\MORTM4_1_SAX"
+    "model_name": "MORTM4.5D-80M-SFT-Gen",
+    "description": "MORTM4.5D 基盤モデルを生成タスク向けにSFTした80Mモデル。メタ情報(楽器/音符密度/キー/ジャンル/生成小節数)と、過去/未来/条件コンテキストMIDIから旋律を生成します。対応タスク: メタのみ生成(meta)、過去からの続き(meta_past)、未来への生成(meta_future)、過去+未来からの中間補完(infill)、他楽器の旋律から指定楽器の旋律を生成する編曲(inst_comp)。可変入出力長(1〜8小節)・42ジャンル・CoT(思考)に対応。",
+    "tag": {
+      "instruments": ["PIANO", "SAX"],
+      "model": "sft_gen",
+      "task": ["meta", "meta_past", "meta_future", "infill", "inst_comp"],
+      "type": "mortm",
+      "version": "4.5",
+      "genres": [
+        "80s", "90s", "alternative", "ambient", "blues", "celtic", "chillout",
+        "classical", "country", "dance", "drumnbass", "easylistening", "electronic",
+        "electropop", "experimental", "folk", "funk", "hiphop", "house", "indie",
+        "instrumentalpop", "instrumentalrock", "jazz", "jazzfusion", "latin", "lounge",
+        "metal", "newage", "orchestral", "pop", "popfolk", "poprock", "punkrock",
+        "reggae", "rock", "soundtrack", "swing", "symphonic", "synthpop", "techno",
+        "trance", "world"
+      ]
+    },
+    "rule": {
+      "input_midi": true,
+      "multi_instrument": true,
+      "temperature": true,
+      "top_p": true,
+      "number_of_generation": true,
+      "send_context_past": true,
+      "send_context_condition": true,
+      "send_context_future": true,
+      "send_chord_progression": false,
+      "gen_measure_count": true,
+      "gen_note_dense": true,
+      "send_chord": false,
+      "send_genre": true
+    },
+    "model_folder_path": "/home/takaaki-nagoshi/PycharmProjects/MORTM_API2/data/models/MORTM45D_80M_sft_gen"
+  },
+  "2": {
+    "model_name": "MORTM4.5D-80M",
+    "description": "MORTM4.5D 基盤(Foundation)モデル(80M)。ブロック穴埋め(Past/Const/Future)による事前学習で得た音楽 of 汎用表現を持ち、条件入力なし(<EOS>のみ)から自律的にピアノ/サックスのフレーズを生成します。フロントからの入力は不要で、温度・top-p・生成数のみ調整できます。",
+    "tag": {
+      "instruments": ["PIANO", "SAX"],
+      "model": "foundation",
+      "task": ["Generate"],
+      "type": "mortm",
+      "version": "4.5"
+    },
+    "rule": {
+      "input_midi": false,
+      "multi_instrument": true,
+      "temperature": true,
+      "top_p": true,
+      "number_of_generation": true,
+      "send_context_past": false,
+      "send_context_condition": false,
+      "send_context_future": false,
+      "send_chord_progression": false,
+      "gen_measure_count": false,
+      "gen_note_dense": false,
+      "send_chord": false,
+      "send_genre": false
+    },
+    "model_folder_path": "/home/takaaki-nagoshi/PycharmProjects/MORTM_API2/data/models/MORTM45D_80M"
   }
 };
 
@@ -122,7 +211,10 @@ app.post('/model_info', async (req, res) => {
   try {
     const response = await fetch(MODEL_INFO_API_URL, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' }
+      headers: {
+        'Content-Type': 'application/json',
+        'ngrok-skip-browser-warning': '1'
+      }
     });
 
     if (!response.ok) {

@@ -1,5 +1,5 @@
 import React from 'react';
-import { Play, Pause, Square, Loader2, ChevronDown } from 'lucide-react';
+import { Play, Pause, Square, Loader2, ChevronDown, Settings as SettingsIcon } from 'lucide-react';
 
 const Controls = ({
     onPlay,
@@ -12,7 +12,9 @@ const Controls = ({
     duration,
     generatedMidis,
     selectedGeneratedMidi,
-    onSelectedGeneratedMidiChange
+    onSelectedGeneratedMidiChange,
+    isSft,
+    onGearClick
 }) => {
     return (
         <div className="space-y-6">
@@ -44,13 +46,26 @@ const Controls = ({
                     </button>
                 </div>
 
-                <button
-                    onClick={onGenerate}
-                    disabled={isGenerating}
-                    className="btn-primary flex items-center gap-2 min-w-[120px] justify-center"
-                >
-                    {isGenerating ? <Loader2 className="w-5 h-5 animate-spin" /> : 'Generate'}
-                </button>
+                <div className="flex items-center gap-2">
+                    <button
+                        onClick={onGenerate}
+                        disabled={isGenerating}
+                        className="btn-primary flex items-center gap-2 min-w-[120px] justify-center"
+                    >
+                        {isGenerating ? <Loader2 className="w-5 h-5 animate-spin" /> : 'Generate'}
+                    </button>
+
+                    {isSft && (
+                        <button
+                            type="button"
+                            onClick={onGearClick}
+                            className="p-2.5 bg-surface border border-border rounded-lg text-text hover:bg-surface/80 hover:text-primary transition-all flex items-center justify-center"
+                            title="Configure Incremental Generation"
+                        >
+                            <SettingsIcon className="w-5 h-5" />
+                        </button>
+                    )}
+                </div>
 
                 {generatedMidis.length > 1 && (
                     <div className="relative min-w-[160px]">

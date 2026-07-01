@@ -1,11 +1,21 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { ArrowLeft, Play, Pause, Square, Music, Activity, SkipForward, Volume2, Settings as SettingsIcon } from 'lucide-react';
+import { ArrowLeft, Play, Pause, Square, Music, Activity, SkipForward, Volume2, Settings as SettingsIcon, UploadCloud, Radio } from 'lucide-react';
 import ModelGridSelector from './ModelGridSelector';
 import AdvancedSettings from './AdvancedSettings';
 import KeySelector from './KeySelector';
 import PianoRoll from './PianoRoll';
 import * as Tone from 'tone';
 import { Midi } from '@tonejs/midi';
+
+const ALL_GENRES = [
+  '80s', '90s', 'alternative', 'ambient', 'blues', 'celtic', 'chillout',
+  'classical', 'country', 'dance', 'drumnbass', 'easylistening', 'electronic',
+  'electropop', 'experimental', 'folk', 'funk', 'hiphop', 'house', 'indie',
+  'instrumentalpop', 'instrumentalrock', 'jazz', 'jazzfusion', 'latin', 'lounge',
+  'metal', 'newage', 'orchestral', 'pop', 'popfolk', 'poprock', 'punkrock',
+  'reggae', 'rock', 'soundtrack', 'swing', 'symphonic', 'synthpop', 'techno',
+  'trance', 'world'
+];
 
 const PodcastMode = ({
     modelInfo,
@@ -25,8 +35,8 @@ const PodcastMode = ({
     const [step, setStep] = useState(1);
     const [selectedModel, setSelectedModel] = useState(null);
 
-    // Filter for pretrained models only
-    const pretrainedModels = modelInfo ? modelInfo.filter(m => m.tag?.model === 'pretrained') : [];
+    // Filter for SFT/SFT-Gen models (which are better suited for recursive appending)
+    const sftModels = modelInfo ? modelInfo.filter(m => m.tag?.model === 'sft_gen' || m.tag?.model === 'sft') : [];
 
     const handleModelSelect = (model) => {
         setSelectedModel(model);
@@ -43,9 +53,9 @@ const PodcastMode = ({
         <div className="h-full flex flex-col">
             {step === 1 ? (
                 <ModelGridSelector
-                    models={pretrainedModels}
+                    models={sftModels}
                     onSelect={handleModelSelect}
-                    title="Select Podcast Model (Pretrained Series)"
+                    title="Select Podcast Model (SFT Generation Series)"
                     selectedModelId={selectedModel?.model_name}
                 />
             ) : (
@@ -70,34 +80,36 @@ const PodcastMode = ({
     );
 };
 
-const PodcastPlayer = ({ model, onBack, settings, onGenerate, setNotification, playbackState, onPlay, onPause, onStop, midiData, setMidiData, onAppendMidi, progress, onSeek }) => {
-    const [initialClips, setInitialClips] = useState([]);
+const PodcastPlayer = ({ model, onBack, settings, onGenerate, setNotification, playbackState, onPlay, onPause, onStop, setMidiData, onAppendMidi, progress, onSeek }) => {
     const [isGenerating, setIsGenerating] = useState(false);
     const [conversationStats, setConversationStats] = useState({ measures: 0, duration: 0 });
-    const [waveActive, setWaveActive] = useState(false);
-    const [previewClip, setPreviewClip] = useState(null);
-    const [keySelectorOpen, setKeySelectorOpen] = useState(false);
     const [uploadedMidi, setUploadedMidi] = useState(null);
+    const [keySelectorOpen, setKeySelectorOpen] = useState(false);
+    const [waveActive, setWaveActive] = useState(false);
 
-    // Using a ref to track the full MIDI composition to avoid playing state issues
-    // We treat compositionRef as the "Podcast Stream"
     const compositionRef = useRef(null);
     const isLoopingRef = useRef(false);
     const pianoRollRef = useRef(null);
 
     useEffect(() => {
-        // Wave active only when playing AND (looping or previewing)
         setWaveActive(playbackState === 'playing');
     }, [playbackState]);
 
-    // Spacebar playback toggle
+    // Sync settings & playbackState to refs for recursive loop access
+    const settingsRef = useRef(settings);
+    useEffect(() => { settingsRef.current = settings; }, [settings]);
+
+    const playbackStateRef = useRef(playbackState);
+    useEffect(() => { playbackStateRef.current = playbackState; }, [playbackState]);
+
+    // Spacebar playback control
     useEffect(() => {
         const handleKeyDown = (e) => {
             if (e.code === 'Space' && e.target.tagName !== 'INPUT' && e.target.tagName !== 'TEXTAREA') {
                 e.preventDefault();
                 if (playbackState === 'playing') {
                     onPause();
-                } else {
+                } else if (compositionRef.current) {
                     onPlay();
                 }
             }
@@ -106,26 +118,15 @@ const PodcastPlayer = ({ model, onBack, settings, onGenerate, setNotification, p
         return () => window.removeEventListener('keydown', handleKeyDown);
     }, [playbackState, onPlay, onPause]);
 
-    // Check if density rule is active
-    const showDensitySettings = model?.rule?.gen_note_dense === true;
+    const updateStats = (midi) => {
+        if (!midi || !midi.header) return;
+        const bpm = midi.header.tempos[0]?.bpm || 120;
+        const duration = midi.duration;
+        const measures = duration / ((60 / bpm) * 4);
+        setConversationStats({ measures: Math.floor(measures), duration: Math.floor(duration) });
+    };
 
-    useEffect(() => {
-        if (showDensitySettings && settings.selectedInstruments) {
-            const newDensities = { ...(settings.densities || {}) };
-            let changed = false;
-            settings.selectedInstruments.forEach(inst => {
-                if (newDensities[inst] === undefined) {
-                    newDensities[inst] = 4; // Default density
-                    changed = true;
-                }
-            });
-            if (changed && settings.setDensities) {
-                settings.setDensities(newDensities);
-            }
-        }
-    }, [settings.selectedInstruments, showDensitySettings]);
-
-    // Instrument logic
+    // Instrument settings mapping
     const availableInstruments = model?.tag?.instruments
         ? (Array.isArray(model.tag.instruments) ? model.tag.instruments : [model.tag.instruments])
         : [];
@@ -139,107 +140,73 @@ const PodcastPlayer = ({ model, onBack, settings, onGenerate, setNotification, p
         }
     };
 
-    // Use a ref for settings to allow the recursive loop to access real-time values
-    const settingsRef = useRef(settings);
-    useEffect(() => {
-        settingsRef.current = settings;
-    }, [settings]);
+    const toggleGenre = (genre) => {
+        const { selectedGenres, setSelectedGenres } = settings;
+        if (!selectedGenres || !setSelectedGenres) return;
+        if (selectedGenres.includes(genre)) {
+            setSelectedGenres(selectedGenres.filter(g => g !== genre));
+        } else {
+            if (selectedGenres.length < 2) {
+                setSelectedGenres([...selectedGenres, genre]);
+            } else {
+                setSelectedGenres([selectedGenres[1], genre]);
+            }
+        }
+    };
 
-    // Track playback state in a ref for the recursive loop
-    const playbackStateRef = useRef(playbackState);
-    useEffect(() => {
-        playbackStateRef.current = playbackState;
-    }, [playbackState]);
-
-    const handleInitialGenerate = async () => {
+    // Initial seed generation using SFT model (no past context)
+    const handleStartPodcast = async () => {
         if (isGenerating || !model) return;
         setIsGenerating(true);
         onStop();
-        setInitialClips([]);
+        
         try {
-            // Include user settings but don't force them strictly on pretrained?
-            // User requested: "都度ユーザーが入力するパラメータは必ず参照するようにしてください"
             const overrideMeta = {
-                num_gems: 3,
+                model_type: model.model_name,
+                program: settings.selectedInstruments || [],
+                tempo: parseInt(settings.tempo, 10) || 120,
+                num_gems: 1,
+                genfield_measure: 8,
+                generate_count: 8,
                 key: settings.key.replace(' ', ''),
                 temperature: settings.temperature,
                 p: settings.p
             };
 
+            if (settings.selectedGenres && settings.selectedGenres.length > 0) {
+                overrideMeta.genre = settings.selectedGenres;
+            }
+
             if (model?.rule?.gen_note_dense && settings.densities) {
                 const densityPayload = {};
-                if (settings.selectedInstruments && settings.selectedInstruments.length > 0) {
-                    settings.selectedInstruments.forEach(inst => {
-                        if (settings.densities[inst]) {
-                            densityPayload[inst] = settings.densities[inst];
-                        }
-                    });
-                }
+                settings.selectedInstruments.forEach(inst => {
+                    if (settings.densities[inst]) densityPayload[inst] = settings.densities[inst];
+                });
                 overrideMeta.gen_note_dense = densityPayload;
-                overrideMeta.genfield_note_dense = densityPayload;
                 overrideMeta.note_density = densityPayload;
             }
 
-            console.log("Generating initial 3 clips...");
+            console.log("Generating initial SFT seed segment...");
             const results = await onGenerate(model.model_name, [], null, {}, null, overrideMeta);
             if (results && results.length > 0) {
-                setInitialClips(results);
+                const seedMidi = new Midi(results[0].toArray());
+                compositionRef.current = seedMidi;
+                setMidiData(seedMidi);
+                updateStats(seedMidi);
+
+                // Start recursive extension loop
+                isLoopingRef.current = true;
+                recursiveGenerationLoop();
             }
         } catch (e) {
             console.error(e);
-            setNotification({ open: true, message: "Podcast generation failed", severity: "error" });
+            setNotification({ open: true, message: "Podcast initialization failed", severity: "error" });
         } finally {
             setIsGenerating(false);
         }
     };
 
-    const handlePreviewClip = (e, clip) => {
-        e.stopPropagation();
-        if (previewClip === clip && playbackState === 'playing') {
-            onPause();
-        } else {
-            setPreviewClip(clip);
-            setMidiData(clip); // Set to main player for preview
-
-            // Wait for state to propagate? 
-            // Tone.Transport sync happens in App.jsx effect
-            setTimeout(() => {
-                onPlay();
-            }, 50);
-        }
-    };
-
-    const handleSelectClip = async (clip) => {
-        console.log("Selected clip, starting podcast loop...");
-        onStop(); // Stop preview if any
-        setInitialClips([]); // Hide selection UI
-        setPreviewClip(null);
-
-        // Initialize composition
-        // Clone clip to allow mutation without side effects
-        const starter = new Midi(clip.toArray());
-        compositionRef.current = starter;
-        setMidiData(starter);
-        updateStats(starter);
-
-        // Start recursive loop
-        isLoopingRef.current = true;
-
-        // Start playing immediately if user wants? Or wait for 16 bars?
-        // Requirement 3C: "Start playback when main melody > 16 measures."
-        // So we just start generating.
-        recursiveGenerationLoop();
-    };
-
-    const updateStats = (midi) => {
-        if (!midi || !midi.header) return;
-        const bpm = midi.header.tempos[0]?.bpm || 120;
-        // Use strict duration
-        const duration = midi.duration;
-        const measures = duration / (60 / bpm * 4);
-        setConversationStats({ measures: Math.floor(measures), duration: Math.floor(duration) });
-    };
-
+    // Recursive Extension Loop using SFT context
     const recursiveGenerationLoop = async () => {
         if (!isLoopingRef.current) return;
 
@@ -250,34 +217,30 @@ const PodcastPlayer = ({ model, onBack, settings, onGenerate, setNotification, p
             updateStats(currentMidi);
 
             const bpm = currentMidi.header.tempos[0]?.bpm || 120;
-            const measureDuration = (60 / bpm) * 4;
-            const totalMeasures = Math.ceil((currentMidi.duration - 0.01) / measureDuration);
+            const timeSignature = currentMidi.header.timeSignatures[0]?.timeSignature || [4, 4];
+            const secondsPerMeasure = (60 / bpm) * timeSignature[0];
+            const totalMeasures = Math.ceil((currentMidi.duration - 0.01) / secondsPerMeasure);
 
-            // Check playback trigger before throttling
-            // Requirement 3C: "Start playback when main melody > 16 measures."
-            if (totalMeasures > 16 && Tone.Transport.state !== 'started') {
-                console.log("Music length > 16 measures, starting playback...");
+            // Playback management: start playing automatically when buffer passes 4 measures
+            if (totalMeasures >= 4 && Tone.Transport.state !== 'started') {
+                console.log("Podcast buffer ready, starting playback...");
                 onPlay();
             }
 
-            // --- Throttling Logic ---
+            // Throttling: If the generation buffer is already 12 measures ahead of current playback, wait.
             const currentSeconds = Tone.Transport.seconds;
-            const currentMeasures = currentSeconds / measureDuration;
+            const currentMeasures = currentSeconds / secondsPerMeasure;
             const futureBufferMeasures = totalMeasures - currentMeasures;
 
-            if (futureBufferMeasures > 16) {
-                console.log(`[Podcast] Future buffer is ${futureBufferMeasures.toFixed(1)} bars. Waiting for playback to catch up...`);
-                // Check again in 2 seconds
+            if (futureBufferMeasures > 12) {
+                console.log(`[SFT Podcast] Buffer is ${futureBufferMeasures.toFixed(1)} measures ahead. Throttling extension...`);
                 setTimeout(() => {
                     requestAnimationFrame(() => recursiveGenerationLoop());
                 }, 2000);
                 return;
             }
-            // ------------------------
 
-            // --- Pause/Stop Logic ---
             if (playbackStateRef.current === 'paused') {
-                console.log("[Podcast] Playback paused. Waiting...");
                 setTimeout(() => {
                     requestAnimationFrame(() => recursiveGenerationLoop());
                 }, 1000);
@@ -285,23 +248,21 @@ const PodcastPlayer = ({ model, onBack, settings, onGenerate, setNotification, p
             }
 
             if (!isLoopingRef.current) {
-                console.log("[Podcast] Loop flag is false. Terminating loop.");
                 setIsGenerating(false);
                 return;
             }
-            // ------------------------
 
-            // A. Prepare past_midi (last 4 measures)
-            const last4MeasuresDuration = measureDuration * 4;
-            // Use grid-aligned duration to prevent off-beat shifts
-            const gridDuration = totalMeasures * measureDuration;
-            const startTime = Math.max(0, gridDuration - last4MeasuresDuration);
+            // Extract past_midi (last 8 measures of current composition)
+            const maxPastMeasures = 8;
+            const pastDuration = secondsPerMeasure * maxPastMeasures;
+            const gridDuration = totalMeasures * secondsPerMeasure;
+            const pastStartTime = Math.max(0, gridDuration - pastDuration);
 
             const getProgramFromInstrument = (instName) => {
                 const name = String(instName).toUpperCase();
                 if (name.includes('PIANO')) return 0;
                 if (name.includes('SAX')) return 65;
-                return 0; // Default to Piano
+                return 0;
             };
 
             const pastMidi = new Midi();
@@ -309,72 +270,64 @@ const PodcastPlayer = ({ model, onBack, settings, onGenerate, setNotification, p
             const program = getProgramFromInstrument(primaryInstrument);
 
             if (currentMidi.header) {
-                // Manually copy properties to preserve Header instance methods
-                pastMidi.header.tempos = JSON.parse(JSON.stringify(currentMidi.header.tempos));
-                pastMidi.header.timeSignatures = JSON.parse(JSON.stringify(currentMidi.header.timeSignatures));
-                pastMidi.header.name = currentMidi.header.name;
+                pastMidi.header.fromJSON(currentMidi.header.toJSON());
             }
 
-            // Extract track data for past_midi context
             let pastNotesCount = 0;
-            currentMidi.tracks.forEach(t => {
-                const track = pastMidi.addTrack();
-                track.instrument.number = program; // Ensure consistent instrument
-                track.channel = t.channel; // Keep channel
-                t.notes.forEach(n => {
-                    if (n.time >= startTime) {
-                        track.addNote({
-                            midi: n.midi,
-                            time: n.time - startTime,
-                            duration: n.duration,
-                            velocity: n.velocity
-                        });
-                        pastNotesCount++;
-                    }
-                });
+            currentMidi.tracks.forEach(track => {
+                const newTrack = pastMidi.addTrack();
+                newTrack.instrument.number = program;
+                if (track.notes) {
+                    track.notes.forEach(note => {
+                        if (note.time >= pastStartTime) {
+                            newTrack.addNote({
+                                midi: note.midi,
+                                time: note.time - pastStartTime,
+                                duration: note.duration,
+                                velocity: note.velocity
+                            });
+                            pastNotesCount++;
+                        }
+                    });
+                }
             });
 
             const pastMidiBlob = pastNotesCount > 0 ? new Blob([pastMidi.toArray()], { type: 'audio/midi' }) : null;
 
-            // Ensure model is still available
             if (!model) {
-                console.warn("Model unavailable, stopping loop.");
                 isLoopingRef.current = false;
                 return;
             }
 
-
-            // B. Generate extension (8 bars as requested)
-            // Using genfield_measure: 8 and generate_count: 8
             setIsGenerating(true);
 
+            // Extend 8 measures with SFT continuation
             const overrideMeta = {
-                task: "Prompt2MIDI",
-                ai_continue_mode: true,
-                generate_count: 8,
-                genfield_measure: 8,
+                model_type: model.model_name,
+                program: settingsRef.current.selectedInstruments || [],
+                tempo: parseInt(settingsRef.current.tempo, 10) || 120,
                 num_gems: 1,
+                genfield_measure: 8,
+                generate_count: 8,
                 key: settingsRef.current.key.replace(' ', ''),
                 temperature: settingsRef.current.temperature,
                 p: settingsRef.current.p
             };
 
+            if (settingsRef.current.selectedGenres && settingsRef.current.selectedGenres.length > 0) {
+                overrideMeta.genre = settingsRef.current.selectedGenres;
+            }
+
             if (model?.rule?.gen_note_dense && settingsRef.current.densities) {
                 const densityPayload = {};
-                if (settingsRef.current.selectedInstruments && settingsRef.current.selectedInstruments.length > 0) {
-                    settingsRef.current.selectedInstruments.forEach(inst => {
-                        if (settingsRef.current.densities[inst]) {
-                            densityPayload[inst] = settingsRef.current.densities[inst];
-                        }
-                    });
-                }
+                settingsRef.current.selectedInstruments.forEach(inst => {
+                    if (settingsRef.current.densities[inst]) densityPayload[inst] = settingsRef.current.densities[inst];
+                });
                 overrideMeta.gen_note_dense = densityPayload;
-                overrideMeta.genfield_note_dense = densityPayload;
                 overrideMeta.note_density = densityPayload;
             }
 
-
-
+            console.log(`Extending podcast composition using SFT model context from time ${pastStartTime.toFixed(2)}s`);
             const results = await onGenerate(
                 model.model_name,
                 [],
@@ -387,76 +340,73 @@ const PodcastPlayer = ({ model, onBack, settings, onGenerate, setNotification, p
 
             if (results && results.length > 0) {
                 const newSegment = results[0];
-
-                // Merge newSegment into composition
                 mergeMidi(newSegment);
-
-                // Continue loop
                 requestAnimationFrame(() => recursiveGenerationLoop());
             } else {
-                console.log("No result returned, satisfying loop?");
+                console.warn("SFT model returned no result, stopping loop.");
                 setIsGenerating(false);
             }
-
         } catch (e) {
-            console.error("Recursive loop error:", e);
+            console.error("Recursive podcast loop failed:", e);
             setNotification({ open: true, message: `Podcast loop error: ${e.message}`, severity: "error" });
             isLoopingRef.current = false;
+            setIsGenerating(false);
         }
     };
 
+    // Clean Append Merge using Smart Append Alignment (Removing model silence default)
     const mergeMidi = (newSegment) => {
-        // Fix for "All sounds ringing"
-        // Ensure new segment is appended CLEANLY.
-        // If result includes context (4 bars) + New (8 bars) = 12 bars total (approx).
-        // OR if ai_continue_mode returns ONLY new part?
-        // Assuming result structure: [Context][New].
-        // We identify the cutoff by ignoring the first `contextDuration`.
-
-        // ALSO: Avoid creating duplicate tracks.
-        // We append notes to existing tracks of `compositionRef.current`.
-
         const currentMidi = compositionRef.current;
+        if (!currentMidi || !newSegment) return;
+
         const bpm = currentMidi.header.tempos[0]?.bpm || 120;
-        const measureDuration = (60 / bpm) * 4;
-        const contextDuration = measureDuration * 4;
+        const timeSignature = currentMidi.header.timeSignatures[0]?.timeSignature || [4, 4];
+        const secondsPerMeasure = (60 / bpm) * timeSignature[0];
 
-        // Use mathematically grid-aligned duration
-        const totalMeasures = Math.ceil((currentMidi.duration - 0.01) / measureDuration);
-        const gridDuration = totalMeasures * measureDuration;
-        const shiftAmount = gridDuration - contextDuration;
+        // 1. Calculate prompt end time aligned to nearest measure boundary
+        const allOriginalNotes = currentMidi.tracks.flatMap(t => t.notes || []);
+        const lastNoteTime = allOriginalNotes.length > 0 ? allOriginalNotes.reduce((max, note) => Math.max(max, note.time + note.duration), 0) : 0;
+        const lastMeasure = Math.ceil(lastNoteTime / secondsPerMeasure);
+        const promptEndTime = lastMeasure * secondsPerMeasure;
 
-        // We only append notes that start AFTER the context duration in the result
-        // to avoid duplicating the context.
-        // Tolerance: 0.1s
+        // 2. SFT Leading Silence Shift Deduction (Smart Append Alignment)
+        const genNotes = newSegment.tracks.flatMap(t => t.notes || []).sort((a, b) => a.time - b.time);
+        const firstGenNoteTime = genNotes.length > 0 ? genNotes[0].time : 0;
 
+        // If SFT model, we expect a 1-measure leading silence (secondsPerMeasure). If detected, we subtract it.
+        const targetShiftMeasures = 1;
+        const alreadyHasShift = firstGenNoteTime >= (targetShiftMeasures * secondsPerMeasure - 0.1);
+        const shiftTime = alreadyHasShift ? (targetShiftMeasures * secondsPerMeasure) : 0;
+
+        console.log("=== Podcast SFT Merge Alignment ===", {
+            promptEndTime: promptEndTime.toFixed(2) + "s",
+            firstGenNoteTime: firstGenNoteTime.toFixed(2) + "s",
+            alreadyHasShift,
+            cutShiftTime: shiftTime.toFixed(2) + "s",
+            targetTime: (promptEndTime - shiftTime).toFixed(2) + "s"
+        });
+
+        // 3. Append notes cleanly to current composition tracks
         currentMidi.tracks.forEach((track, i) => {
-            // Match by channel if possible, else index
-            const resultTrack = newSegment.tracks.find(t => t.channel === track.channel) || newSegment.tracks[i];
-
-            if (resultTrack) {
+            const resultTrack = newSegment.tracks[i] || newSegment.tracks[0];
+            if (resultTrack && resultTrack.notes) {
                 resultTrack.notes.forEach(note => {
-                    if (note.time >= contextDuration - 0.1) {
-                        track.addNote({
-                            midi: note.midi,
-                            time: note.time + shiftAmount,
-                            duration: note.duration,
-                            velocity: note.velocity
-                        });
-                    }
+                    const finalTime = note.time + promptEndTime - shiftTime;
+                    track.addNote({
+                        midi: note.midi,
+                        time: Math.max(promptEndTime, finalTime),
+                        duration: note.duration,
+                        velocity: note.velocity
+                    });
                 });
             }
         });
 
-        // Force refresh midiData to update UI
-        // We use toArray() to rebuild valid binary then parse back
+        // Rebuild MIDI buffer and update state
         const refreshedMidi = new Midi(currentMidi.toArray());
-
         compositionRef.current = refreshedMidi;
 
-        // Only update App state if we are currently playing/looping this composition
         if (isLoopingRef.current) {
-            // Use append mode to avoid audio glitch
             if (onAppendMidi) {
                 onAppendMidi(refreshedMidi);
             } else {
@@ -470,88 +420,90 @@ const PodcastPlayer = ({ model, onBack, settings, onGenerate, setNotification, p
         isLoopingRef.current = false;
         setIsGenerating(false);
         onStop();
+        if (onBack) onBack();
     };
 
-    // Clean up
     useEffect(() => {
-        return () => {
-            isLoopingRef.current = false;
-        }
+        return () => { isLoopingRef.current = false; };
     }, []);
 
+    // File dropping/parsing logic (unchanged structure but clean integration)
     const processMidiFile = async (file) => {
         if (!file) return;
         try {
             const arrayBuffer = await file.arrayBuffer();
             const midi = new Midi(arrayBuffer);
             setUploadedMidi(midi);
-            setMidiData(midi); // Pass to global for preview playback
+            setMidiData(midi);
         } catch (error) {
-            console.error("Error parsing MIDI:", error);
-            setNotification({ open: true, message: "Error parsing MIDI file", severity: "error" });
+            console.error("MIDI parse error:", error);
+            setNotification({ open: true, message: "Error parsing uploaded MIDI file", severity: "error" });
         }
     };
 
     const handleCropAndStart = () => {
         if (!uploadedMidi) return;
-        
-        const selectedRange = pianoRollRef.current?.getSelectedRange() || [0,0];
+        const selectedRange = pianoRollRef.current?.getSelectedRange() || [0, 0];
         const bpm = uploadedMidi.header.tempos[0]?.bpm || 120;
         const timeSignature = uploadedMidi.header.timeSignatures[0]?.timeSignature || [4, 4];
         const secondsPerMeasure = (60 / bpm) * timeSignature[0];
-        
+
         let targetMidi;
-        
         if (selectedRange[0] === 0 && selectedRange[1] === 0) {
             targetMidi = uploadedMidi;
         } else {
             const startTime = selectedRange[0] * secondsPerMeasure;
             const endTime = (selectedRange[1] + 1) * secondsPerMeasure;
-            
+
             const newMidi = new Midi();
             if (uploadedMidi.header) {
-                newMidi.header.tempos = JSON.parse(JSON.stringify(uploadedMidi.header.tempos));
-                newMidi.header.timeSignatures = JSON.parse(JSON.stringify(uploadedMidi.header.timeSignatures));
+                if (uploadedMidi.header.tempos?.[0]) newMidi.header.setTempo(uploadedMidi.header.tempos[0].bpm);
                 newMidi.header.name = uploadedMidi.header.name;
             }
 
             uploadedMidi.tracks.forEach(t => {
                 const track = newMidi.addTrack();
                 track.instrument = t.instrument;
-                track.channel = t.channel;
-                t.notes.forEach(n => {
-                    if (n.time >= startTime && n.time < endTime) {
-                        track.addNote({
-                            midi: n.midi,
-                            time: n.time - startTime,
-                            duration: Math.min(n.duration, endTime - n.time),
-                            velocity: n.velocity
-                        });
-                    }
-                });
+                if (t.notes) {
+                    t.notes.forEach(n => {
+                        if (n.time >= startTime && n.time < endTime) {
+                            track.addNote({
+                                midi: n.midi,
+                                time: n.time - startTime,
+                                duration: Math.min(n.duration, endTime - n.time),
+                                velocity: n.velocity
+                            });
+                        }
+                    });
+                }
             });
             targetMidi = newMidi;
         }
-        
+
         setUploadedMidi(null);
-        handleSelectClip(targetMidi);
+        // Start podcast loop using the cropped MIDI as starting context
+        compositionRef.current = targetMidi;
+        setMidiData(targetMidi);
+        updateStats(targetMidi);
+        isLoopingRef.current = true;
+        recursiveGenerationLoop();
     };
 
-    const handleDrop = (event) => {
-        event.preventDefault();
-        event.stopPropagation();
-        const file = event.dataTransfer?.files[0];
+    const handleDrop = (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        const file = e.dataTransfer?.files[0];
         if (file && (file.name.endsWith('.mid') || file.name.endsWith('.midi'))) {
             processMidiFile(file);
         } else {
-            setNotification({ open: true, message: "Please upload a valid .mid or .midi file", severity: "warning" });
+            setNotification({ open: true, message: "Upload a valid MIDI file", severity: "warning" });
         }
     };
 
-    const handleDragOver = (event) => {
-        event.preventDefault();
-        event.stopPropagation();
-        event.dataTransfer.dropEffect = 'copy';
+    const handleDragOver = (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        e.dataTransfer.dropEffect = 'copy';
     };
 
     return (
@@ -563,141 +515,114 @@ const PodcastPlayer = ({ model, onBack, settings, onGenerate, setNotification, p
                         <ArrowLeft className="w-4 h-4" /> Exit
                     </button>
                     <div className="h-4 w-[1px] bg-border"></div>
-                    <span className="flex items-center gap-2 text-sm font-medium">
-                        Model: <span className="text-primary">{model?.model_name}</span>
-                        {isGenerating && <span className="text-xs text-muted animate-pulse ml-2">Generating...</span>}
+                    <span className="flex items-center gap-2 text-sm font-medium text-text">
+                        SFT Model: <span className="text-primary font-bold">{model?.model_name}</span>
+                        {isGenerating && <span className="text-xs text-primary/80 animate-pulse ml-2 flex items-center gap-1"><Radio className="w-3.5 h-3.5 animate-bounce" /> Streaming Extension...</span>}
                     </span>
                 </div>
                 {compositionRef.current && (
                     <div className="flex items-center gap-4 text-xs font-mono text-muted">
-                        <span className="flex items-center gap-1"><Activity className="w-3 h-3" /> {conversationStats.measures} Bars</span>
-                        <span className="flex items-center gap-1"><Music className="w-3 h-3" /> {conversationStats.duration}s</span>
+                        <span className="flex items-center gap-1"><Activity className="w-3 h-3 text-primary" /> {conversationStats.measures} Bars</span>
+                        <span className="flex items-center gap-1"><Music className="w-3 h-3 text-primary" /> {conversationStats.duration}s</span>
                     </div>
                 )}
             </div>
 
             {/* Main Content */}
-            <div className="flex-1 flex flex-col items-center justify-center p-8 overflow-y-auto w-full relative">
-
-                {/* Visualizer */}
+            <div className="flex-1 flex flex-col items-center justify-center p-8 overflow-y-auto w-full relative bg-radial-gradient">
+                
+                {/* Visualizer / Dropper */}
                 <div 
-                    className="w-full max-w-2xl h-64 bg-black/40 rounded-3xl border border-white/5 flex items-center justify-center mb-8 relative overflow-hidden group"
+                    className={`w-full max-w-2xl h-64 rounded-3xl border border-white/5 flex flex-col items-center justify-center mb-8 relative overflow-hidden group transition-all duration-350 shadow-2xl ${waveActive ? 'bg-primary/5 border-primary/20 shadow-primary/5' : 'bg-black/40'}`}
                     onDrop={handleDrop}
                     onDragOver={handleDragOver}
                 >
-                    <div className={`flex items-end gap-1 h-32 ${waveActive ? 'opacity-100' : 'opacity-30'}`}>
-                        {[...Array(20)].map((_, i) => (
+                    {/* Equalizer waves */}
+                    <div className={`flex items-end gap-1.5 h-24 ${waveActive ? 'opacity-100' : 'opacity-20 transition-opacity duration-300'}`}>
+                        {[...Array(24)].map((_, i) => (
                             <div
                                 key={i}
-                                className={`w-3 bg-primary/80 rounded-full transition-all duration-300 ${waveActive ? 'animate-pulse' : ''}`}
+                                className={`w-2.5 bg-gradient-to-t from-primary to-secondary rounded-full transition-all duration-150`}
                                 style={{
-                                    height: waveActive ? `${20 + Math.random() * 80}%` : '20%',
-                                    animationDelay: `${i * 0.1}s`,
-                                    transition: 'height 0.1s ease'
+                                    height: waveActive ? `${15 + Math.random() * 85}%` : '15%',
+                                    animationDelay: `${i * 0.05}s`,
                                 }}
                             />
                         ))}
                     </div>
 
-                    {/* Play Overlay if not started */}
-                    {initialClips.length === 0 && !compositionRef.current && !isGenerating && (
-                        <button
-                            onClick={handleInitialGenerate}
-                            className="absolute inset-0 flex items-center justify-center bg-black/50 hover:bg-black/40 transition-all text-white backdrop-blur-sm"
-                        >
-                            <Play className="w-20 h-20 fill-white drop-shadow-lg scale-100 hover:scale-110 transition-transform" />
-                            <span className="absolute mt-24 text-lg font-bold">Press Start or Upload MIDI File</span>
-                        </button>
+                    {/* Drag-n-Drop overlay overlay */}
+                    {!compositionRef.current && !isGenerating && (
+                        <div className="absolute inset-0 flex flex-col items-center justify-center bg-black/60 backdrop-blur-md transition-all text-white p-6 text-center">
+                            <UploadCloud className="w-12 h-12 text-primary/80 mb-3 animate-bounce" />
+                            <h4 className="text-base font-bold mb-1">Drag & Drop MIDI file here</h4>
+                            <p className="text-xs text-muted max-w-xs mb-4">Or start a brand new generation stream with selected SFT model</p>
+                            
+                            <button
+                                onClick={handleStartPodcast}
+                                className="px-8 py-3 bg-primary hover:bg-primary/95 text-white font-bold rounded-xl shadow-lg shadow-primary/20 hover:scale-105 active:scale-95 transition-all text-sm flex items-center gap-2"
+                            >
+                                <Play className="w-4 h-4 fill-white" /> Start SFT Podcast Stream
+                            </button>
+                        </div>
                     )}
 
                     {isGenerating && (
-                        <div className="absolute inset-0 flex items-center justify-center bg-black/50 backdrop-blur-sm z-10">
-                            <Activity className="w-12 h-12 text-primary animate-spin" />
+                        <div className="absolute inset-0 flex flex-col items-center justify-center bg-black/60 backdrop-blur-md z-10 text-white">
+                            <div className="relative flex items-center justify-center w-16 h-16 mb-2">
+                                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-primary opacity-30"></span>
+                                <Radio className="w-8 h-8 text-primary animate-pulse" />
+                            </div>
+                            <span className="text-xs font-mono text-primary/90 tracking-widest uppercase animate-pulse">SFT Extending...</span>
                         </div>
                     )}
                 </div>
 
-                {/* Initial Selection View */}
-                {initialClips.length > 0 && (
-                    <div className="w-full max-w-4xl">
-                        <h3 className="text-center text-lg font-medium mb-4 text-white">Select a starting theme</h3>
-                        <div className="grid grid-cols-1 md:grid-cols-3 gap-4 animate-in slide-in-from-bottom-4">
-                            {initialClips.map((clip, i) => {
-                                const isPreviewing = previewClip === clip && playbackState === 'playing';
-                                return (
-                                    <div key={i} className="bg-surface border border-border rounded-xl p-4 hover:border-primary transition-all cursor-pointer group hover:-translate-y-1 hover:shadow-xl hover:shadow-primary/10 relative">
-                                        <div className="text-center text-sm font-medium text-muted mb-2">Option {i + 1}</div>
-                                        <div className="h-24 bg-black/20 rounded-lg flex items-center justify-center group-hover:bg-primary/10 transition-colors mb-4 relative overflow-hidden">
-                                            <div onClick={(e) => handlePreviewClip(e, clip)} className="cursor-pointer p-4 rounded-full bg-black/40 hover:bg-primary hover:text-white transition-all z-10">
-                                                {isPreviewing ? <Pause className="w-6 h-6" /> : <Play className="w-6 h-6" />}
-                                            </div>
-                                        </div>
-                                        <div className="flex gap-2">
-                                            <button
-                                                onClick={() => handleSelectClip(clip)}
-                                                className="flex-1 py-2 bg-primary/10 text-primary rounded-lg text-sm font-bold group-hover:bg-primary group-hover:text-white transition-all"
-                                            >
-                                                Select & Start Loop
-                                            </button>
-                                        </div>
-                                    </div>
-                                )
-                            })}
-                        </div>
-                        <div className="flex justify-center mt-6">
-                            <button
-                                onClick={handleInitialGenerate}
-                                disabled={isGenerating}
-                                className="px-6 py-2 bg-surface border border-border rounded-full text-sm font-medium hover:bg-surface/80 flex items-center gap-2 transition-all"
-                            >
-                                <SkipForward className="w-4 h-4" /> Regenerate Options
-                            </button>
-                        </div>
-                    </div>
-                )}
-
                 {compositionRef.current && (
-                    <div className="w-full max-w-2xl text-center text-muted text-sm mt-4 animate-in fade-in">
-                        <p>Podcast is running. Sit back and listen.</p>
-                        <p className="text-xs opacity-50 mt-1">Generating continuation every 4 bars...</p>
+                    <div className="w-full max-w-md text-center text-muted text-xs mt-4 bg-surface/40 backdrop-blur-md border border-border/50 rounded-2xl p-4 shadow-xl space-y-1 animate-in fade-in duration-500">
+                        <p className="text-sm font-semibold text-text flex items-center justify-center gap-1.5"><Radio className="w-4 h-4 text-red-500 animate-pulse" /> SFT Live Podcast Stream is active</p>
+                        <p className="opacity-75">The composition is recursively extending by 8 bars using direct SFT prediction.</p>
+                        <p className="opacity-50 text-[10px]">Sit back, listen, and enjoy the infinite generative music.</p>
                     </div>
                 )}
             </div>
 
             {/* Controls */}
-            <div className="h-auto border-t border-border bg-surface shrink-0 p-4">
-                <div className="container mx-auto max-w-6xl grid grid-cols-1 md:grid-cols-12 gap-6">
+            <div className="h-auto border-t border-border bg-surface/80 backdrop-blur-md shrink-0 p-6">
+                <div className="container mx-auto max-w-6xl grid grid-cols-1 md:grid-cols-12 gap-6 items-center">
                     <div className="col-span-12 md:col-span-4 space-y-4">
-                        {/* Basic Settings */}
-                        <div className="bg-surface/50 rounded-xl p-4 border border-border space-y-4">
-                            <h4 className="text-sm font-medium text-muted mb-2 flex items-center gap-2"><SettingsIcon className="w-3 h-3" /> Basic Settings</h4>
+                        {/* Configuration Card */}
+                        <div className="bg-surface/50 rounded-xl p-4 border border-border/60 space-y-4 shadow-inner">
+                            <h4 className="text-xs font-bold tracking-widest text-muted uppercase flex items-center gap-2">
+                                <SettingsIcon className="w-3.5 h-3.5 text-primary" /> Configuration
+                            </h4>
 
-                            {/* Key Selector */}
-                            <div className="space-y-1.5">
-                                <label className="text-xs font-medium text-muted">Key</label>
+                            {/* Key Selection */}
+                            <div className="space-y-1">
+                                <label className="text-[10px] font-bold text-muted uppercase tracking-wider">Key Signature</label>
                                 <button
                                     onClick={() => setKeySelectorOpen(true)}
-                                    className="w-full p-2 bg-surface border border-border rounded-lg text-left hover:bg-surface/80 transition-colors flex items-center justify-between text-sm"
+                                    className="w-full p-2.5 bg-surface border border-border rounded-xl text-left hover:border-primary transition-all flex items-center justify-between text-xs font-medium"
                                 >
-                                    <span className="font-medium">{settings.key}</span>
-                                    <Music className="w-3 h-3 text-muted" />
+                                    <span>{settings.key}</span>
+                                    <Music className="w-3.5 h-3.5 text-muted" />
                                 </button>
                             </div>
 
-                            {/* Instruments */}
+                            {/* Instruments Selector */}
                             {availableInstruments.length > 0 && (
-                                <div className="space-y-2">
-                                    <label className="text-xs font-medium text-muted">Instruments</label>
-                                    <div className="flex flex-wrap gap-2">
+                                <div className="space-y-1">
+                                    <label className="text-[10px] font-bold text-muted uppercase tracking-wider">Target Voice Instruments</label>
+                                    <div className="flex flex-wrap gap-1.5">
                                         {availableInstruments.map(inst => (
                                             <button
                                                 key={inst}
                                                 disabled={!!compositionRef.current}
                                                 onClick={() => toggleInstrument(inst)}
-                                                className={`px-2 py-1 rounded-md text-xs font-medium transition-all duration-200 ${settings.selectedInstruments?.includes(inst)
-                                                    ? 'bg-primary text-white shadow-sm'
+                                                className={`px-3 py-1.5 rounded-lg text-xs font-semibold tracking-wide transition-all ${settings.selectedInstruments?.includes(inst)
+                                                    ? 'bg-primary text-white shadow-md shadow-primary/20'
                                                     : 'bg-surface border border-border text-text hover:bg-surface/80'
-                                                    } ${!!compositionRef.current ? 'opacity-50 cursor-not-allowed' : ''}`}
+                                                    } ${compositionRef.current ? 'opacity-50 cursor-not-allowed' : ''}`}
                                             >
                                                 {inst}
                                             </button>
@@ -706,15 +631,38 @@ const PodcastPlayer = ({ model, onBack, settings, onGenerate, setNotification, p
                                 </div>
                             )}
 
-                            {/* Density Settings */}
+                            {/* Genres Selector */}
+                            <div className="space-y-1.5">
+                                <label className="text-[10px] font-bold text-muted uppercase tracking-wider">Genres (Max 2)</label>
+                                <div className="flex flex-wrap gap-1 max-h-24 overflow-y-auto p-1.5 bg-surface border border-border/80 rounded-xl">
+                                    {ALL_GENRES.map(genre => {
+                                        const isSelected = settings.selectedGenres?.includes(genre);
+                                        return (
+                                            <button
+                                                key={genre}
+                                                disabled={!!compositionRef.current}
+                                                onClick={() => toggleGenre(genre)}
+                                                className={`px-2 py-1 rounded-md text-[10px] font-bold transition-all ${isSelected
+                                                    ? 'bg-primary text-white shadow-sm'
+                                                    : 'bg-surface/50 text-muted hover:text-text'
+                                                    } ${compositionRef.current ? 'opacity-50 cursor-not-allowed' : ''}`}
+                                            >
+                                                {genre}
+                                            </button>
+                                        );
+                                    })}
+                                </div>
+                            </div>
+
+                            {/* Note Density Sliders */}
                             {model?.rule?.gen_note_dense && settings.selectedInstruments?.length > 0 && (
-                                <div className="space-y-3 pt-2 border-t border-border mt-4">
-                                    <label className="text-xs font-medium text-muted">Note Density (1-8)</label>
+                                <div className="space-y-3 pt-3 border-t border-border/50">
+                                    <label className="text-[10px] font-bold text-muted uppercase tracking-wider">Note Density Override</label>
                                     <div className="space-y-2">
                                         {settings.selectedInstruments.map(inst => (
                                             <div key={inst} className="space-y-1">
                                                 <div className="flex justify-between items-center text-xs">
-                                                    <span className="font-mono text-primary">{inst}</span>
+                                                    <span className="font-mono text-primary font-bold">{inst}</span>
                                                     <span className="font-mono text-muted">{settings.densities?.[inst] || 4}</span>
                                                 </div>
                                                 <input
@@ -722,13 +670,12 @@ const PodcastPlayer = ({ model, onBack, settings, onGenerate, setNotification, p
                                                     min="1"
                                                     max="10"
                                                     step="1"
-
                                                     value={settings.densities?.[inst] || 4}
                                                     onChange={(e) => {
                                                         const newDensities = { ...(settings.densities || {}), [inst]: parseInt(e.target.value) };
                                                         settings.setDensities(newDensities);
                                                     }}
-                                                    className="w-full h-1.5 bg-surface rounded-lg appearance-none cursor-pointer accent-primary"
+                                                    className="w-full h-1 bg-border rounded-lg appearance-none cursor-pointer accent-primary"
                                                 />
                                             </div>
                                         ))}
@@ -737,20 +684,26 @@ const PodcastPlayer = ({ model, onBack, settings, onGenerate, setNotification, p
                             )}
                         </div>
 
-                        {/* Advanced Settings - hiding numGems */}
+                        {/* Hidden parameters settings (temperature, p) */}
                         <AdvancedSettings
                             {...settings}
                             rules={{ ...model?.rule, number_of_generation: false }}
+                            isSft={model?.tag?.model === 'sft_gen' || model?.tag?.model === 'sft'}
                         />
                     </div>
-                    <div className="col-span-12 md:col-span-8 flex items-center justify-center gap-4">
+
+                    {/* Center Big Playback Controller */}
+                    <div className="col-span-12 md:col-span-8 flex flex-col items-center justify-center gap-4 py-4">
                         <button
                             onClick={playbackState === 'playing' ? onPause : onPlay}
-                            disabled={!compositionRef.current && !previewClip}
-                            className={`w-20 h-20 rounded-full flex items-center justify-center transition-all shadow-xl ${playbackState === 'playing' ? 'bg-primary text-white scale-100' : 'bg-surface border border-border text-primary hover:scale-105 disabled:opacity-50 disabled:hover:scale-100'}`}
+                            disabled={!compositionRef.current}
+                            className={`w-24 h-24 rounded-full flex items-center justify-center transition-all shadow-2xl hover:scale-105 active:scale-95 disabled:scale-100 ${playbackState === 'playing' ? 'bg-primary text-white shadow-primary/20' : 'bg-surface border border-border text-primary disabled:opacity-40'}`}
                         >
-                            {playbackState === 'playing' ? <Pause className="w-8 h-8 fill-current" /> : <Play className="w-8 h-8 fill-current ml-1" />}
+                            {playbackState === 'playing' ? <Pause className="w-10 h-10 fill-current" /> : <Play className="w-10 h-10 fill-current ml-2" />}
                         </button>
+                        <span className="text-[10px] font-bold tracking-widest text-muted uppercase">
+                            {playbackState === 'playing' ? 'Stream active' : 'Stream idle'}
+                        </span>
                     </div>
                 </div>
             </div>

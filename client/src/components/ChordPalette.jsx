@@ -2,6 +2,23 @@ import React, { useState, useEffect } from 'react';
 import { roots, qualities, bases } from '../chordData';
 import { X } from 'lucide-react';
 
+const ToggleGroup = ({ items, selected, onChange }) => (
+    <div className="flex flex-wrap justify-center gap-2 mb-4">
+        {items.map(item => (
+            <button
+                key={item}
+                onClick={() => onChange(item)}
+                className={`px-3 py-1.5 rounded-md text-sm font-medium transition-all duration-200 ${selected === item
+                        ? 'bg-primary text-white shadow-lg shadow-primary/25'
+                        : 'bg-surface border border-border text-text hover:bg-surface/80 hover:border-primary/50'
+                    }`}
+            >
+                {item}
+            </button>
+        ))}
+    </div>
+);
+
 const ChordPalette = ({ open, onClose, onSave, chord }) => {
     const [selectedRoot, setSelectedRoot] = useState('C');
     const [selectedQuality, setSelectedQuality] = useState('None');
@@ -31,23 +48,6 @@ const ChordPalette = ({ open, onClose, onSave, chord }) => {
     };
 
     if (!open) return null;
-
-    const ToggleGroup = ({ items, selected, onChange }) => (
-        <div className="flex flex-wrap justify-center gap-2 mb-4">
-            {items.map(item => (
-                <button
-                    key={item}
-                    onClick={() => onChange(item)}
-                    className={`px-3 py-1.5 rounded-md text-sm font-medium transition-all duration-200 ${selected === item
-                            ? 'bg-primary text-white shadow-lg shadow-primary/25'
-                            : 'bg-surface border border-border text-text hover:bg-surface/80 hover:border-primary/50'
-                        }`}
-                >
-                    {item}
-                </button>
-            ))}
-        </div>
-    );
 
     return (
         <div className="fixed inset-0 z-[100] flex items-center justify-center p-4">

@@ -12,10 +12,16 @@ export default defineConfig(({ mode }) => {
         '/generate': {
           target: env.VITE_API_BASE_URL,
           changeOrigin: true,
+          headers: {
+            'ngrok-skip-browser-warning': '1'
+          }
         },
         '/model_info': {
           target: env.VITE_API_BASE_URL,
           changeOrigin: true,
+          headers: {
+            'ngrok-skip-browser-warning': '1'
+          }
         },
       }
     }

@@ -1,25 +1,35 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { ChevronRight, X } from 'lucide-react';
 
-const ModelSelector = ({ selectedModel, setSelectedModel, modelInfo, debugMode, selectedTask = "Meta2MIDI" }) => {
+const ModelSelector = ({ selectedModel, setSelectedModel, modelInfo, debugMode, selectedTask = "Meta2MIDI", sftLocked }) => {
     const [drawerOpen, setDrawerOpen] = useState(false);
 
     const allModels = useMemo(() => modelInfo ? Object.values(modelInfo) : [], [modelInfo]);
 
     const models = useMemo(() => {
-        if (!selectedTask) return allModels;
-        return allModels.filter(m => {
-            // Check if model supports the selected task
-            const supportedTasks = m.tag?.task;
-            if (Array.isArray(supportedTasks)) {
-                return supportedTasks.includes(selectedTask);
-            } else if (typeof supportedTasks === 'string') {
-                return supportedTasks === selectedTask;
-            }
-            // Fallback for older model_info format
-            return true;
-        });
-    }, [allModels, selectedTask]);
+        let filtered = allModels;
+        if (selectedTask) {
+            filtered = allModels.filter(m => {
+                // Check if model supports the selected task
+                const supportedTasks = m.tag?.task;
+                const modelType = m.tag?.model;
+                if (selectedTask === 'Meta2MIDI' && (modelType === 'sft_gen' || modelType === 'sft' || modelType === 'foundation')) {
+                    return true;
+                }
+                if (Array.isArray(supportedTasks)) {
+                    return supportedTasks.includes(selectedTask);
+                } else if (typeof supportedTasks === 'string') {
+                    return supportedTasks === selectedTask;
+                }
+                // Fallback for older model_info format
+                return true;
+            });
+        }
+        if (sftLocked) {
+            filtered = filtered.filter(m => m.tag?.model === 'sft_gen');
+        }
+        return filtered;
+    }, [allModels, selectedTask, sftLocked]);
 
     useEffect(() => {
         if (models.length > 0) {

@@ -35,10 +35,12 @@ const PianoRoll = forwardRef(({ midiData, progress, duration, generationLength, 
     const [verticalZoom, setVerticalZoom] = useState(1);
     const [selectedTrackIndex, setSelectedTrackIndex] = useState(0);
 
-    // Reset selected track when midiData changes
+    // Reset selected track when midiData changes, but only if index exceeds bounds
     useEffect(() => {
-        setSelectedTrackIndex(0);
-    }, [midiData]);
+        if (midiData && midiData.tracks && selectedTrackIndex >= midiData.tracks.length) {
+            setSelectedTrackIndex(0);
+        }
+    }, [midiData, selectedTrackIndex]);
 
     const pixelsPerSecond = 80 * horizontalZoom;
     const NOTE_HEIGHT = 20 * verticalZoom;
@@ -152,6 +154,14 @@ const PianoRoll = forwardRef(({ midiData, progress, duration, generationLength, 
             }
         }
     }, [midiData, verticalZoom, NOTE_HEIGHT, selectedTrackIndex]); // Re-center when track changes
+
+    // Auto-scroll horizontally to the selected range when selection changes or generation completes
+    useEffect(() => {
+        if (midiData && scrollContainerRef.current && selectedMeasures[0] > 0) {
+            const scrollLeft = selectedMeasures[0] * pixelsPerMeasure;
+            scrollContainerRef.current.scrollLeft = scrollLeft - 50; // Give 50px padding to avoid screen edge clipping
+        }
+    }, [midiData, selectedMeasures, pixelsPerMeasure]);
 
     const handleContainerClick = (e) => {
         const rect = e.currentTarget.getBoundingClientRect();

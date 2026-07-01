@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef, useMemo } from 'react';
 import * as Tone from 'tone';
 import { Midi } from '@tonejs/midi';
 import JSZip from 'jszip';
-import { Loader2, AlertCircle, CheckCircle2, Info } from 'lucide-react';
+import { Loader2, AlertCircle, CheckCircle2, Info, Music } from 'lucide-react';
 import Soundfont from 'soundfont-player';
 import Header from './components/Header.jsx';
 import MidiInput from './components/MidiInput.jsx';
@@ -14,10 +14,21 @@ import { GM_INSTRUMENTS } from './constants/instrumentNames';
 import Sidebar from './components/Sidebar.jsx';
 import VSMode from './components/VSMode.jsx';
 import PodcastMode from './components/PodcastMode.jsx';
+import KeySelector from './components/KeySelector.jsx';
 
 const API_BASE_URL = import.meta.env.PROD
   ? import.meta.env.VITE_API_BASE_URL
   : '';
+
+const ALL_GENRES = [
+  '80s', '90s', 'alternative', 'ambient', 'blues', 'celtic', 'chillout',
+  'classical', 'country', 'dance', 'drumnbass', 'easylistening', 'electronic',
+  'electropop', 'experimental', 'folk', 'funk', 'hiphop', 'house', 'indie',
+  'instrumentalpop', 'instrumentalrock', 'jazz', 'jazzfusion', 'latin', 'lounge',
+  'metal', 'newage', 'orchestral', 'pop', 'popfolk', 'poprock', 'punkrock',
+  'reggae', 'rock', 'soundtrack', 'swing', 'symphonic', 'synthpop', 'techno',
+  'trance', 'world'
+];
 
 function App() {
   const [debugMode, setDebugMode] = useState(false);
@@ -49,8 +60,24 @@ function App() {
   const [selectedInstruments, setSelectedInstruments] = useState([]);
   const [densities, setDensities] = useState({});
   const [selectedTask, setSelectedTask] = useState('Meta2MIDI');
+  const [selectedGenres, setSelectedGenres] = useState([]);
+  const [thinking, setThinking] = useState(true);
+  const [generationReasons, setGenerationReasons] = useState(null);
+
+  const [sftLocked, setSftLocked] = useState(false);
+  const [customKey, setCustomKey] = useState(null);
+  const [customDensities, setCustomDensities] = useState(null);
+  const [showSftMetadataModal, setShowSftMetadataModal] = useState(false);
+  const [showSftIncrementalConfigModal, setShowSftIncrementalConfigModal] = useState(false);
+  const [sftTask, setSftTask] = useState('auto');
+  const [customTask, setCustomTask] = useState(null);
+  const [cotTemperature, setCotTemperature] = useState(0.1);
 
   const [modelInfo, setModelInfo] = useState([]);
+  const selectedModelObject = useMemo(() =>
+    modelInfo.find(m => m.model_name === selectedModel)
+  , [modelInfo, selectedModel]);
+  const isSft = selectedModelObject?.tag?.model === 'sft_gen' || selectedModelObject?.tag?.model === 'sft';
   const [generatedMidis, setGeneratedMidis] = useState([]);
   const [selectedGeneratedMidi, setSelectedGeneratedMidi] = useState(0);
   const [notification, setNotification] = useState({ open: false, message: '', severity: 'info' });
@@ -77,7 +104,12 @@ function App() {
   useEffect(() => {
     const fetchModelInfo = async () => {
       try {
-        const response = await fetch(`${API_BASE_URL}/model_info`, { method: 'POST' });
+        const response = await fetch(`${API_BASE_URL}/model_info`, {
+          method: 'POST',
+          headers: {
+            'ngrok-skip-browser-warning': '1'
+          }
+        });
 
         if (!response.ok) {
           throw new Error(`Network response was not ok: ${response.statusText}`);
@@ -244,7 +276,19 @@ function App() {
   }, [trackMutes, trackSolos, instruments]);
 
   useEffect(() => {
-    console.log('Scheduling effect running', {
+    // Only compile playback schedule if we are actively playing.
+    // This prevents blocking the JS main thread upon generation completion or edit actions.
+    if (playbackState !== 'playing') {
+      if (scheduledEventsRef.current.length > 0) {
+        console.log('Clearing scheduled events (playback inactive)...');
+        scheduledEventsRef.current.forEach(id => Tone.Transport.clear(id));
+        scheduledEventsRef.current = [];
+        lastScheduledTimeRef.current = 0;
+      }
+      return;
+    }
+
+    console.log('Scheduling effect running (playback active)', {
       midiData: !!midiData,
       samplerLoaded,
       instrumentsLength: instruments.length,
@@ -313,7 +357,7 @@ function App() {
         lastScheduledTimeRef.current = 0;
       }
     }
-  }, [midiData, samplerLoaded, instruments]);
+  }, [midiData, samplerLoaded, instruments, playbackState]);
 
   useEffect(() => {
     Tone.Transport.bpm.value = tempo;
@@ -327,6 +371,7 @@ function App() {
     setMidiData(newMidiData);
     setOriginalMidi(newMidiData);
     setGeneratedMidis([]);
+    setGenerationRange(null);
     if (newMidiData.header.tempos.length > 0) {
       setTempo(Math.round(newMidiData.header.tempos[0].bpm));
     }
@@ -408,9 +453,14 @@ function App() {
       p: p,
       temperature: temperature,
       split_measure: 99,
-      key: key.includes('Major') ? key.replace(' Major', 'M') : key.replace(' Minor', 'm'),
-      num_gems: numGems
+      key: key === 'Auto' ? null : (key.includes('Major') ? key.replace(' Major', 'M') : key.replace(' Minor', 'm')),
+      num_gems: numGems,
+      thinking: thinking
     };
+
+    if (rules.send_genre && selectedGenres.length > 0) {
+      meta.genre = selectedGenres;
+    }
 
     if (hasChords) {
       const measures = chordEntries.map(([k]) => parseInt(k.split('-')[0]));
@@ -476,10 +526,30 @@ function App() {
 
 
     try {
-      const response = await fetch(`${API_BASE_URL}/generate`, { method: 'POST', body: formData });
+      const response = await fetch(`${API_BASE_URL}/generate`, {
+        method: 'POST',
+        body: formData,
+        headers: {
+          'ngrok-skip-browser-warning': '1'
+        }
+      });
       if (!response.ok) {
         const errorText = await response.text();
         throw new Error(errorText);
+      }
+
+      if (modelObject?.tag?.model === 'sft_gen') {
+        setSftLocked(true);
+      }
+
+      const reasonHeader = response.headers.get("X-Generation-Reason");
+      if (reasonHeader) {
+        try {
+          const decoded = JSON.parse(decodeURIComponent(reasonHeader));
+          setGenerationReasons(decoded);
+        } catch (e) {
+          console.error("Failed to parse X-Generation-Reason", e);
+        }
       }
 
       const contentType = response.headers.get("content-type");
@@ -517,35 +587,40 @@ function App() {
     }
   };
 
-  const handleGenerate = async () => {
+  const handleGenerate = async (overrides = null) => {
+    console.log("=== [STEP 1] handleGenerate Initialized ===");
+    console.log("Current state:", { selectedModel, selectedInstruments, tempo, key, hasMidiData: !!midiData });
     if (!selectedModel) {
-      setNotification({ open: true, message: "Please select a model from the Settings dropdown first.", severity: 'warning' });
+      console.warn("Generation aborted: No model selected.");
+      setNotification({ open: true, message: "Please select a model first.", severity: 'warning' });
       return;
     }
     const modelObject = modelInfo.find(model => model.model_name === selectedModel);
     const modelType = modelObject?.tag?.model;
     const rules = modelObject?.rule || {};
-
-    if (!originalMidi && modelType !== 'pretrained') {
-      setNotification({ open: true, message: "Please upload a MIDI file first.", severity: 'warning' });
-      return;
-    }
+    console.log("Model Info details:", { modelObject, modelType, rules });
 
     const notes = pianoRollRef.current?.getSelectedNotes() || [];
     const selectedRange = pianoRollRef.current?.getSelectedRange() || [0, 0];
     const hasSelection = selectedRange[0] !== 0 || selectedRange[1] !== 0;
+    console.log("PianoRoll Selection details:", { notesCount: notes.length, selectedRange, hasSelection });
 
     // Validation for selection
-    if (!hasSelection && modelType !== 'pretrained' && !rules.gen_measure_count) {
-      setNotification({ open: true, message: "ピアノロールで生成元の小節を選択してください。", severity: 'warning' });
-      return;
+    if (originalMidi && modelType !== 'foundation') {
+      if (!hasSelection && modelType !== 'pretrained' && !rules.gen_measure_count) {
+        console.warn("Validation failed: Selection required but not found.");
+        setNotification({ open: true, message: "ピアノロールで生成元の小節を選択してください。", severity: 'warning' });
+        return;
+      }
+
+      if (rules.gen_measure_count && !hasSelection) {
+        console.warn("Validation failed: Range selection required.");
+        setNotification({ open: true, message: "生成する小節の範囲を選択してください。", severity: 'warning' });
+        return;
+      }
     }
 
-    if (rules.gen_measure_count && !hasSelection) {
-      setNotification({ open: true, message: "生成する小節の範囲を選択してください。", severity: 'warning' });
-      return;
-    }
-
+    console.log("=== [STEP 2] Setting Loading State and backing up originalMidi ===");
     setIsGenerating(true);
     setNotification({ open: true, message: "Generating... Please wait.", severity: 'info' });
 
@@ -563,10 +638,10 @@ function App() {
       const measures = chordEntries.map(([k]) => parseInt(k.split('-')[0]));
       effectiveRange = [Math.min(...measures), Math.max(...measures)];
     } else if (!hasSelection) {
-      effectiveRange = [0, 7]; // Default
+      effectiveRange = null;
     }
 
-    const measureCount = (effectiveRange[1] - effectiveRange[0] + 1);
+    const measureCount = effectiveRange ? (effectiveRange[1] - effectiveRange[0] + 1) : 8;
     setGenerationRange(effectiveRange);
 
     const bpm = originalMidi?.header.tempos[0]?.bpm || tempo || 120;
@@ -574,7 +649,7 @@ function App() {
     const beatsPerMeasure = timeSignature[0];
     const secondsPerBeat = 60 / bpm;
     const secondsPerMeasure = secondsPerBeat * beatsPerMeasure;
-    const selectionStartTime = effectiveRange[0] * secondsPerMeasure;
+    const selectionStartTime = effectiveRange ? effectiveRange[0] * secondsPerMeasure : 0;
 
     const getProgramFromInstrument = (instName) => {
       const name = String(instName).toUpperCase();
@@ -586,7 +661,8 @@ function App() {
     const midi = new Midi();
     midi.header.setTempo(bpm);
     const track = midi.addTrack();
-    const primaryInstrument = selectedInstruments[0] || 'PIANO';
+    const activeInstruments = (overrides && overrides.instruments) ? overrides.instruments : (selectedInstruments || []);
+    const primaryInstrument = activeInstruments[0] || 'PIANO';
     track.instrument.number = getProgramFromInstrument(primaryInstrument);
 
     notes.forEach(note => {
@@ -615,46 +691,163 @@ function App() {
       finalChords.push({ ...chordsBeforeRange[chordsBeforeRange.length - 1], startTime: selectionStartTime });
     }
 
-    const currentTask = finalChords.length > 0 ? "Chord2MIDI" : "Meta2MIDI";
-    setLastTask(currentTask);
+    const isSftIncremental = isSft && originalMidi && hasSelection;
 
-    // Key formatting: "C M" -> "CM", "A Major" -> "AM", "B Minor" -> "Bm"
-    const formattedKey = key
-      .replace(' Major', 'M')
-      .replace(' Minor', 'm')
-      .replace(' M', 'M')
-      .replace(' m', 'm')
-      .replace(' ', '');
+    // SFT Task Routing Logic
+    let effectiveSftTask = sftTask;
+    let sendPast = false;
+    let sendFuture = false;
+    let sendCondition = false;
 
-    const meta = {
-      model_type: selectedModel,
-      program: selectedInstruments,
-      tempo: tempo,
-      task: currentTask,
-      p: p,
-      temperature: temperature,
-      split_measure: 99,
-      key: formattedKey,
-      num_gems: numGems,
-      genfield_measure: Math.min(64, measureCount)
-    };
+    if (isSft) {
+      if (isSftIncremental && customTask !== null) {
+        effectiveSftTask = customTask;
+      }
+      
+      if (effectiveSftTask === 'auto') {
+        const hasPastNotes = hasSelection ? (pianoRollRef.current?.getPastNotes(8) || []).length > 0 : (originalMidi ? true : false);
+        const hasFutureNotes = hasSelection ? (pianoRollRef.current?.getFutureNotes(8) || []).length > 0 : false;
+        
+        if (hasPastNotes && hasFutureNotes) {
+          effectiveSftTask = 'infill';
+        } else if (hasPastNotes) {
+          effectiveSftTask = 'meta_past';
+        } else if (hasFutureNotes) {
+          effectiveSftTask = 'meta_future';
+        } else {
+          const selectedNotes = pianoRollRef.current?.getSelectedNotes() || [];
+          if (selectedNotes.length > 0) {
+            effectiveSftTask = 'inst_comp';
+          } else {
+            effectiveSftTask = 'meta';
+          }
+        }
+      }
 
-    if (rules.gen_note_dense) {
-      const densityPayload = {};
-      selectedInstruments.forEach(inst => { if (densities[inst]) densityPayload[inst] = densities[inst]; });
-      meta.gen_note_dense = densityPayload;
-      meta.note_density = densityPayload;
+      if (effectiveSftTask === 'infill') {
+        sendPast = true;
+        sendFuture = true;
+      } else if (effectiveSftTask === 'meta_past') {
+        sendPast = true;
+      } else if (effectiveSftTask === 'meta_future') {
+        sendFuture = true;
+      } else if (effectiveSftTask === 'inst_comp') {
+        sendCondition = true;
+      } else { // meta
+        // no context midi sent
+      }
     }
 
-    if (currentTask === "Chord2MIDI") {
-      meta.chord_item = finalChords.map(c => getChordText(c.chord));
-      meta.chord_times = finalChords.map(c => c.startTime);
-    } else if (rules.use_chord || rules.send_chord) {
-      const promptEndTime = notes.length > 0 ? notes.reduce((max, note) => Math.max(max, note.time + note.duration), 0) : 0;
-      const metaFilteredChords = allChordTimings.filter(c => c.startTime >= promptEndTime);
-      if (metaFilteredChords.length > 0) {
-        meta.chord_item = metaFilteredChords.map(c => getChordText(c.chord));
-        meta.chord_times = metaFilteredChords.map(c => c.startTime);
+    const currentTask = finalChords.length > 0 ? "Chord2MIDI" : "Meta2MIDI";
+    setLastTask(isSft ? effectiveSftTask : currentTask);
+
+    // Calculate chord time offset based on which context MIDI is sent and offset-corrected
+    let chordTimeOffset = 0;
+    const willSendPast = rules.send_context_past || isSft;
+    const willSendCondition = rules.send_context_condition || (isSft && hasSelection);
+
+    if (willSendPast) {
+      // If past_midi is sent, pastStartTime (Math.max(0, selectionStartTime - 8 * secondsPerMeasure)) is the time-origin
+      chordTimeOffset = hasSelection 
+        ? Math.max(0, selectionStartTime - 8 * secondsPerMeasure)
+        : 0;
+    } else if (willSendCondition && hasSelection) {
+      // If conditions_midi is sent as context, selectionStartTime is the time-origin
+      chordTimeOffset = selectionStartTime;
+    }
+
+    console.log("Chord Alignment Debug:", { chordTimeOffset, willSendPast, willSendCondition, selectionStartTime });
+
+    const programToSend = (activeInstruments && activeInstruments.length > 0)
+      ? activeInstruments
+      : ['PIANO'];
+
+    let meta = {};
+    if (modelType === 'foundation') {
+      meta = {
+        model_type: selectedModel,
+        tempo: parseInt(tempo, 10) || 120,
+        temperature: temperature,
+        p: p,
+        num_gems: numGems
+      };
+    } else if (isSftIncremental) {
+      meta = {
+        model_type: selectedModel,
+        program: programToSend,
+        tempo: parseInt(tempo, 10) || 120,
+        task: isSft ? effectiveSftTask : currentTask,
+        genfield_measure: isSft ? Math.max(1, Math.min(8, measureCount)) : Math.min(64, measureCount),
+        generate_count: isSft ? Math.max(1, Math.min(8, measureCount)) : Math.min(64, measureCount),
+        thinking: thinking,
+        cot_temperature: cotTemperature
+      };
+
+      if (customKey !== null) {
+        const formattedCustomKey = customKey === 'Auto' ? null : customKey
+          .replace(' Major', 'M')
+          .replace(' Minor', 'm')
+          .replace(' M', 'M')
+          .replace(' m', 'm')
+          .replace(' ', '');
+        meta.key = formattedCustomKey;
+      }
+
+      if (customDensities !== null) {
+        meta.gen_note_dense = customDensities;
+        meta.note_density = customDensities;
+      }
+    } else {
+      const activeKey = (overrides && overrides.key) ? overrides.key : key;
+      const activeDensities = (overrides && overrides.densities) ? overrides.densities : densities;
+      const activeGenres = (overrides && overrides.genres) ? overrides.genres : selectedGenres;
+
+      // Key formatting: "C M" -> "CM", "A Major" -> "AM", "B Minor" -> "Bm"
+      const formattedKey = activeKey === 'Auto' ? null : activeKey
+        .replace(' Major', 'M')
+        .replace(' Minor', 'm')
+        .replace(' M', 'M')
+        .replace(' m', 'm')
+        .replace(' ', '');
+
+      meta = {
+        model_type: selectedModel,
+        program: programToSend,
+        tempo: parseInt(tempo, 10) || 120,
+        task: isSft ? effectiveSftTask : currentTask,
+        p: p,
+        temperature: temperature,
+        split_measure: 99,
+        key: formattedKey,
+        num_gems: isSft ? 1 : numGems,
+        genfield_measure: isSft ? Math.max(1, Math.min(8, measureCount)) : Math.min(64, measureCount),
+        thinking: thinking,
+        cot_temperature: cotTemperature
+      };
+
+      if ((rules.send_genre || isSft) && activeGenres.length > 0) {
+        meta.genre = activeGenres;
+      }
+
+      if (rules.gen_note_dense || isSft) {
+        const densityPayload = {};
+        activeInstruments.forEach(inst => { if (activeDensities[inst]) densityPayload[inst] = activeDensities[inst]; });
+        meta.gen_note_dense = densityPayload;
+        meta.note_density = densityPayload;
+      }
+    }
+
+    if (!isSftIncremental) {
+      if (currentTask === "Chord2MIDI") {
+        meta.chord_item = finalChords.map(c => getChordText(c.chord));
+        meta.chord_times = finalChords.map(c => Math.max(0, c.startTime - chordTimeOffset));
+      } else if (rules.use_chord || rules.send_chord) {
+        const promptEndTime = notes.length > 0 ? notes.reduce((max, note) => Math.max(max, note.time + note.duration), 0) : 0;
+        const metaFilteredChords = allChordTimings.filter(c => c.startTime >= promptEndTime);
+        if (metaFilteredChords.length > 0) {
+          meta.chord_item = metaFilteredChords.map(c => getChordText(c.chord));
+          meta.chord_times = metaFilteredChords.map(c => Math.max(0, c.startTime - chordTimeOffset));
+        }
       }
     }
 
@@ -686,83 +879,254 @@ function App() {
     const metaBlob = new Blob([JSON.stringify(meta, null, 2)], { type: 'application/json' });
 
     const formData = new FormData();
-    if (midiBlob) {
-      formData.append('conditions_midi', midiBlob, 'input.mid');
+    if (modelType !== 'foundation') {
+      if (midiBlob && !rules.send_context_condition) {
+        formData.append('conditions_midi', midiBlob, 'input.mid');
+      }
     }
     formData.append('meta_json', metaBlob, 'meta.json');
 
 
 
     // Context Sending Logic
-    if (rules.send_context_past) {
-      const pastNotes = pianoRollRef.current?.getPastNotes(8) || [];
-      if (pastNotes.length > 0) {
+    if (isSft) {
+      if (sendPast && originalMidi) {
+        const pastStartTime = hasSelection
+          ? Math.max(0, selectionStartTime - 8 * secondsPerMeasure)
+          : 0;
+        const pastEndTime = hasSelection
+          ? selectionStartTime
+          : originalMidi.duration;
+
         const pastMidi = new Midi();
         pastMidi.header.setTempo(bpm);
-        const pastTrack = pastMidi.addTrack();
-        pastTrack.instrument.number = getProgramFromInstrument(primaryInstrument);
-        pastNotes.forEach(note => {
-          pastTrack.addNote({ midi: note.midi, time: note.time, duration: note.duration, velocity: note.velocity });
+        let pastNotesAdded = false;
+
+        originalMidi.tracks.forEach(track => {
+          const trackNotes = (track.notes || []).filter(note => {
+            return note.time >= pastStartTime && note.time < pastEndTime;
+          });
+          if (trackNotes.length > 0) {
+            const newTrack = pastMidi.addTrack();
+            newTrack.instrument.number = track.instrument.number;
+            newTrack.name = track.name;
+            trackNotes.forEach(note => {
+              newTrack.addNote({
+                midi: note.midi,
+                time: Math.max(0, note.time - pastStartTime),
+                duration: note.duration,
+                velocity: note.velocity
+              });
+            });
+            pastNotesAdded = true;
+          }
         });
-        const pastBlob = new Blob([pastMidi.toArray()], { type: 'audio/midi' });
-        formData.append('past_midi', pastBlob, 'past.mid');
+
+        if (pastNotesAdded) {
+          const pastBlob = new Blob([pastMidi.toArray()], { type: 'audio/midi' });
+          formData.append('past_midi', pastBlob, 'past.mid');
+        }
       }
 
-    }
+      if (sendCondition && originalMidi) {
+        const condStartTime = effectiveRange ? effectiveRange[0] * secondsPerMeasure : 0;
+        const condEndTime = effectiveRange ? (effectiveRange[1] + 1) * secondsPerMeasure : 0;
 
-    if (rules.send_context_condition) {
-      // Condition is essentially the selected notes, but sent as a separate file
-      if (notes.length > 0) {
         const conditionMidi = new Midi();
         conditionMidi.header.setTempo(bpm);
-        const conditionTrack = conditionMidi.addTrack();
-        conditionTrack.instrument.number = getProgramFromInstrument(primaryInstrument);
-        notes.forEach(note => {
-          conditionTrack.addNote({ midi: note.midi, time: note.time, duration: note.duration, velocity: note.velocity });
+        let conditionNotesAdded = false;
+
+        originalMidi.tracks.forEach(track => {
+          const trackNotes = (track.notes || []).filter(note => {
+            return note.time >= condStartTime && note.time < condEndTime;
+          });
+          if (trackNotes.length > 0) {
+            const newTrack = conditionMidi.addTrack();
+            newTrack.instrument.number = track.instrument.number;
+            newTrack.name = track.name;
+            trackNotes.forEach(note => {
+              newTrack.addNote({
+                midi: note.midi,
+                time: Math.max(0, note.time - condStartTime),
+                duration: note.duration,
+                velocity: note.velocity
+              });
+            });
+            conditionNotesAdded = true;
+          }
         });
-        const conditionBlob = new Blob([conditionMidi.toArray()], { type: 'audio/midi' });
-        formData.append('conditions_midi', conditionBlob, 'conditions.mid');
+
+        if (conditionNotesAdded) {
+          const conditionBlob = new Blob([conditionMidi.toArray()], { type: 'audio/midi' });
+          formData.append('conditions_midi', conditionBlob, 'conditions.mid');
+        }
       }
 
-    }
+      if (sendFuture && originalMidi) {
+        const selectionEndTime = effectiveRange ? (effectiveRange[1] + 1) * secondsPerMeasure : 0;
+        const futureEndTime = selectionEndTime + 8 * secondsPerMeasure;
 
-    if (rules.send_context_future) {
-      const futureNotes = pianoRollRef.current?.getFutureNotes(8) || [];
-      if (futureNotes.length > 0) {
         const futureMidi = new Midi();
         futureMidi.header.setTempo(bpm);
-        const futureTrack = futureMidi.addTrack();
-        futureTrack.instrument.number = getProgramFromInstrument(primaryInstrument);
-        futureNotes.forEach(note => {
-          futureTrack.addNote({ midi: note.midi, time: note.time, duration: note.duration, velocity: note.velocity });
+        let futureNotesAdded = false;
+
+        originalMidi.tracks.forEach(track => {
+          const trackNotes = (track.notes || []).filter(note => {
+            return note.time >= selectionEndTime && note.time < futureEndTime;
+          });
+          if (trackNotes.length > 0) {
+            const newTrack = futureMidi.addTrack();
+            newTrack.instrument.number = track.instrument.number;
+            newTrack.name = track.name;
+            trackNotes.forEach(note => {
+              newTrack.addNote({
+                midi: note.midi,
+                time: Math.max(0, note.time - selectionEndTime),
+                duration: note.duration,
+                velocity: note.velocity
+              });
+            });
+            futureNotesAdded = true;
+          }
         });
-        const futureBlob = new Blob([futureMidi.toArray()], { type: 'audio/midi' });
-        formData.append('future_midi', futureBlob, 'future.mid');
+
+        if (futureNotesAdded) {
+          const futureBlob = new Blob([futureMidi.toArray()], { type: 'audio/midi' });
+          formData.append('future_midi', futureBlob, 'future.mid');
+        }
+      }
+    } else if (modelType !== 'foundation') {
+      if (rules.send_context_past) {
+        let pastNotes = [];
+        let pastStartTime = 0;
+
+        if (hasSelection) {
+          pastNotes = pianoRollRef.current?.getPastNotes(8) || [];
+          pastStartTime = Math.max(0, selectionStartTime - 8 * secondsPerMeasure);
+        } else if (originalMidi) {
+          pastNotes = originalMidi.tracks.flatMap(t => t.notes || []);
+          pastStartTime = 0;
+        }
+
+        if (pastNotes.length > 0) {
+          const pastMidi = new Midi();
+          pastMidi.header.setTempo(bpm);
+          const pastTrack = pastMidi.addTrack();
+          pastTrack.instrument.number = getProgramFromInstrument(primaryInstrument);
+          pastNotes.forEach(note => {
+            pastTrack.addNote({
+              midi: note.midi,
+              time: Math.max(0, note.time - pastStartTime),
+              duration: note.duration,
+              velocity: note.velocity
+            });
+          });
+          const pastBlob = new Blob([pastMidi.toArray()], { type: 'audio/midi' });
+          formData.append('past_midi', pastBlob, 'past.mid');
+        }
       }
 
+      if (rules.send_context_condition) {
+        if (notes.length > 0) {
+          const conditionMidi = new Midi();
+          conditionMidi.header.setTempo(bpm);
+          const conditionTrack = conditionMidi.addTrack();
+          conditionTrack.instrument.number = getProgramFromInstrument(primaryInstrument);
+          notes.forEach(note => {
+            conditionTrack.addNote({
+              midi: note.midi,
+              time: Math.max(0, note.time - selectionStartTime),
+              duration: note.duration,
+              velocity: note.velocity
+            });
+          });
+          const conditionBlob = new Blob([conditionMidi.toArray()], { type: 'audio/midi' });
+          formData.append('conditions_midi', conditionBlob, 'conditions.mid');
+        }
+      }
+
+      if (rules.send_context_future) {
+        const futureNotes = pianoRollRef.current?.getFutureNotes(8) || [];
+        if (futureNotes.length > 0) {
+          const futureMidi = new Midi();
+          futureMidi.header.setTempo(bpm);
+          const futureTrack = futureMidi.addTrack();
+          futureTrack.instrument.number = getProgramFromInstrument(primaryInstrument);
+          futureNotes.forEach(note => {
+            futureTrack.addNote({ midi: note.midi, time: note.time, duration: note.duration, velocity: note.velocity });
+          });
+          const futureBlob = new Blob([futureMidi.toArray()], { type: 'audio/midi' });
+          formData.append('future_midi', futureBlob, 'future.mid');
+        }
+      }
     }
 
     try {
-      const response = await fetch(`${API_BASE_URL}/generate`, { method: 'POST', body: formData });
+      console.log("=== [STEP 3] Dispatching /generate POST request ===");
+      const response = await fetch(`${API_BASE_URL}/generate`, {
+        method: 'POST',
+        body: formData,
+        headers: {
+          'ngrok-skip-browser-warning': '1'
+        }
+      });
+      console.log("=== [STEP 4] /generate API response received ===", { status: response.status, statusText: response.statusText });
 
       if (response.ok) {
+        if (isSft) {
+          console.log("SFT lock active, setting setSftLocked(true).");
+          setSftLocked(true);
+        }
+        const reasonHeader = response.headers.get("X-Generation-Reason");
+        if (reasonHeader) {
+          try {
+            const decoded = JSON.parse(decodeURIComponent(reasonHeader));
+            console.log("X-Generation-Reason decoded:", decoded);
+            setGenerationReasons(decoded);
+          } catch (e) {
+            console.error("Failed to parse X-Generation-Reason", e);
+          }
+        }
+
         const contentType = response.headers.get("content-type");
         if (contentType && contentType.includes("application/zip")) {
           const blob = await response.blob();
+
+          // Verify ZIP magic bytes 'PK' (0x50, 0x4B) to prevent JSZip from scanning/hanging on invalid data
+          const zipHeaderBuffer = await blob.slice(0, 4).arrayBuffer();
+          const zipHeader = new Uint8Array(zipHeaderBuffer);
+          const isZip = zipHeader[0] === 0x50 && zipHeader[1] === 0x4B;
+          if (!isZip) {
+            throw new Error("Invalid ZIP file received (missing PK signature). The response may be corrupted or an error message.");
+          }
+
           const zip = await JSZip.loadAsync(blob);
           const midiPromises = [];
           const jsonPromises = [];
 
           zip.forEach((relativePath, zipEntry) => {
             if (zipEntry.name.endsWith('.mid')) {
-              midiPromises.push(zipEntry.async('arraybuffer').then(buffer => new Midi(buffer)));
+              midiPromises.push(zipEntry.async('arraybuffer').then(buffer => {
+                // Verify MIDI magic bytes 'MThd' (0x4D, 0x54, 0x68, 0x64) before parsing
+                const midiHeader = new Uint8Array(buffer, 0, Math.min(4, buffer.byteLength));
+                const isMidi = midiHeader[0] === 0x4D && 
+                               midiHeader[1] === 0x54 && 
+                               midiHeader[2] === 0x68 && 
+                               midiHeader[3] === 0x64;
+                if (!isMidi) {
+                  throw new Error(`Invalid MIDI file inside zip: ${zipEntry.name} (missing MThd signature).`);
+                }
+                return new Midi(buffer);
+              }));
             } else if (zipEntry.name.endsWith('.json')) {
               jsonPromises.push(zipEntry.async('string'));
             }
           });
 
+          console.log("=== [STEP 5] Parsing response as ZIP ===");
           const loadedMidis = await Promise.all(midiPromises);
           const loadedJsons = await Promise.all(jsonPromises);
+          console.log("ZIP contents successfully parsed:", { midisCount: loadedMidis.length, jsonsCount: loadedJsons.length });
 
           if (loadedJsons.length > 0) {
             setNotification({ open: true, message: loadedJsons.join('\n'), severity: 'info' });
@@ -774,9 +1138,22 @@ function App() {
             setNotification({ open: true, message: 'Generation complete, but no relevant files were produced.', severity: 'warning' });
           }
         } else if (contentType && (contentType.includes("audio/midi") || contentType.includes("application/x-midi"))) {
+          console.log("=== [STEP 5] Parsing response as single MIDI file ===");
           const blob = await response.blob();
           const arrayBuffer = await blob.arrayBuffer();
+
+          // Verify MIDI magic bytes 'MThd' (0x4D, 0x54, 0x68, 0x64) before parsing
+          const midiHeader = new Uint8Array(arrayBuffer, 0, Math.min(4, arrayBuffer.byteLength));
+          const isMidi = midiHeader[0] === 0x4D && 
+                         midiHeader[1] === 0x54 && 
+                         midiHeader[2] === 0x68 && 
+                         midiHeader[3] === 0x64;
+          if (!isMidi) {
+            throw new Error("Invalid MIDI file received (missing MThd signature).");
+          }
+
           const midi = new Midi(arrayBuffer);
+          console.log("Parsed MIDI object:", { tracksCount: midi.tracks.length, duration: midi.duration });
           setGeneratedMidis([midi]);
           setSelectedGeneratedMidi(0);
           setNotification({ open: true, message: `Successfully generated MIDI file.`, severity: 'success' });
@@ -785,12 +1162,23 @@ function App() {
           try {
             const blob = await response.blob();
             const arrayBuffer = await blob.arrayBuffer();
+
+            // Verify MIDI magic bytes 'MThd' (0x4D, 0x54, 0x68, 0x64) before parsing
+            const midiHeader = new Uint8Array(arrayBuffer, 0, Math.min(4, arrayBuffer.byteLength));
+            const isMidi = midiHeader[0] === 0x4D && 
+                           midiHeader[1] === 0x54 && 
+                           midiHeader[2] === 0x68 && 
+                           midiHeader[3] === 0x64;
+            if (!isMidi) {
+              throw new Error("Invalid MIDI file signature (missing MThd).");
+            }
+
             const midi = new Midi(arrayBuffer);
             setGeneratedMidis([midi]);
             setSelectedGeneratedMidi(0);
             setNotification({ open: true, message: `Successfully generated MIDI file (fallback).`, severity: 'success' });
           } catch (e) {
-            setNotification({ open: true, message: `Unknown response format: ${contentType}`, severity: 'error' });
+            setNotification({ open: true, message: `Unknown or invalid response format: ${contentType || 'unknown'}. Parsing failed: ${e.message}`, severity: 'error' });
           }
         }
       } else {
@@ -823,152 +1211,259 @@ function App() {
 
     const generatedMidi = generatedMidis[selectedGeneratedMidi];
 
-    if (!modelType || !generatedMidi) return;
+    console.log("=== [MERGE EFFECT TRIGGERED] ===", {
+      modelType,
+      hasGeneratedMidi: !!generatedMidi,
+      tracksCount: generatedMidi?.tracks?.length,
+      hasOriginalMidi: !!originalMidi,
+      generationRange,
+      lastTask
+    });
 
-    // If we have generated midis, we should display them.
-    // For pretrained, we don't need originalMidi.
-    // For sft, we need originalMidi to combine.
+    if (!modelType || !generatedMidi || !generatedMidi.tracks) {
+      console.log("Merge effect early return: Missing required data.");
+      return;
+    }
 
+    try {
+      if (modelType === 'foundation' || !originalMidi || (modelType === 'pretrained' && lastTask !== 'Chord2MIDI')) {
+        console.log("Executing Branch 1: Set directly to generatedMidi.");
+        setMidiData(generatedMidi);
+      } else if (generationRange && (lastTask === 'Chord2MIDI' || originalMidi)) {
+        console.log("Executing Branch 2: Range-based / Chord2MIDI merge.", { generationRange });
+        // Merge logic for Chord2MIDI or Range-based generation
+        const targetTrackIndex = pianoRollRef.current?.getSelectedTrackIndex() || 0;
+        const rawBpm = originalMidi?.header.tempos[0]?.bpm || tempo || 120;
+        const bpm = rawBpm > 0 ? rawBpm : 120;
+        const timeSignature = originalMidi?.header.timeSignatures[0]?.timeSignature || [4, 4];
+        const secondsPerMeasure = (60 / bpm) * timeSignature[0];
 
-    if (modelType === 'pretrained' && lastTask !== 'Chord2MIDI') {
-      setMidiData(generatedMidi);
-    } else if (lastTask === 'Chord2MIDI' || (generationRange && originalMidi)) {
-      // Merge logic for Chord2MIDI or Range-based generation
-      const targetTrackIndex = pianoRollRef.current?.getSelectedTrackIndex() || 0;
-      const bpm = originalMidi?.header.tempos[0]?.bpm || tempo || 120;
-      const timeSignature = originalMidi?.header.timeSignatures[0]?.timeSignature || [4, 4];
-      const secondsPerMeasure = (60 / bpm) * timeSignature[0];
+        // Determine shift time (e.g. 1 measure shift for SFT models)
+        const ruleShiftMeasure = modelObject?.rule?.shift_measure;
+        const shiftMeasures = typeof ruleShiftMeasure === 'number' ? ruleShiftMeasure : (isSft ? 1 : 0);
+        const shiftTime = shiftMeasures * secondsPerMeasure;
 
-      const selectionStartTime = generationRange[0] * secondsPerMeasure;
-      const selectionEndTime = (generationRange[1] + 1) * secondsPerMeasure;
+        const selectionStartTime = generationRange[0] * secondsPerMeasure;
+        const selectionEndTime = (generationRange[1] + 1) * secondsPerMeasure;
 
-      // Smart Offset Decision
-      const allReceivedNotes = generatedMidi.tracks.flatMap(t => t.notes).sort((a, b) => a.time - b.time);
-      const firstNoteTime = allReceivedNotes.length > 0 ? allReceivedNotes[0].time : 0;
+        // Smart Offset Decision
+        const allReceivedNotes = generatedMidi.tracks
+          .flatMap(t => t.notes || [])
+          .filter(note => typeof note.time === 'number' && !isNaN(note.time) && isFinite(note.time))
+          .sort((a, b) => a.time - b.time);
+        const firstNoteTime = allReceivedNotes.length > 0 ? allReceivedNotes[0].time : 0;
 
-      // If the result starts significantly before the selection (e.g. at 0.0 while selection is at 2.0+),
-      // we assume it needs offsetting. If it's already around or after selectionStartTime, we use it as is.
-      const needsOffset = firstNoteTime < (selectionStartTime - 0.1);
-      const offsetToApply = needsOffset ? selectionStartTime : 0;
+        // For range-based generation, the model might output a default silence (e.g. 1 measure).
+        // We subtract shiftTime to align the actual musical notes exactly with the user's selectionStartTime.
+        const needsOffset = firstNoteTime < (selectionStartTime - 0.1);
+        const offsetToApply = needsOffset ? (selectionStartTime - shiftTime) : -shiftTime;
 
-      console.group("🔍 MIDI Merge Debug Information");
-      console.log("Selection Start Time (sec):", selectionStartTime.toFixed(3) + "s");
-      console.log("First Received Note Time (Raw):", firstNoteTime.toFixed(3) + "s");
-      console.log("Offset being applied:", offsetToApply.toFixed(3) + "s");
-      console.groupEnd();
+        console.group("🔍 MIDI Merge Debug Information");
+        console.log("Selection Start Time (sec):", selectionStartTime.toFixed(3) + "s");
+        console.log("Model-specific Shift Time (sec):", shiftTime.toFixed(3) + "s (" + shiftMeasures + " measure(s))");
+        console.log("First Received Note Time (Raw):", firstNoteTime.toFixed(3) + "s");
+        console.log("Offset being applied:", offsetToApply.toFixed(3) + "s");
+        console.groupEnd();
 
-      const newMidi = new Midi();
-      // Use setTempo instead of overwriting the header object
-      if (originalMidi && originalMidi.header && originalMidi.header.tempos[0]) {
-        newMidi.header.setTempo(originalMidi.header.tempos[0].bpm);
-        newMidi.header.name = originalMidi.header.name;
+        const newMidi = new Midi();
+        if (originalMidi && originalMidi.header) {
+          // 'ppq' is a read-only getter, so we modify the backing private field '_ppq' directly
+          newMidi.header._ppq = originalMidi.header.ppq;
+          if (originalMidi.header.tempos[0]) {
+            newMidi.header.setTempo(originalMidi.header.tempos[0].bpm);
+            newMidi.header.name = originalMidi.header.name;
+          }
+        } else {
+          newMidi.header.setTempo(bpm);
+        }
+
+        const tracksToProcess = originalMidi ? originalMidi.tracks : [null];
+
+        tracksToProcess.forEach((track, index) => {
+          const newTrack = newMidi.addTrack();
+          if (track) {
+            newTrack.instrument.number = track.instrument.number;
+            newTrack.name = track.name;
+          }
+
+          if (index === targetTrackIndex) {
+            // 1. Add notes BEFORE selection from original
+            if (track && track.notes) {
+              track.notes.forEach(note => {
+                if (note.time < selectionStartTime) {
+                  newTrack.addNote({
+                    midi: note.midi,
+                    time: note.time,
+                    duration: note.duration,
+                    velocity: note.velocity
+                  });
+                }
+              });
+            }
+
+            // 2. Add GENERATED notes
+            generatedMidi.tracks.forEach(genTrack => {
+              if (genTrack.notes) {
+                genTrack.notes.forEach(note => {
+                  newTrack.addNote({
+                    midi: note.midi,
+                    time: note.time + offsetToApply,
+                    duration: note.duration,
+                    velocity: note.velocity
+                  });
+                });
+              }
+            });
+
+            // 3. Add notes AFTER selection from original
+            if (track && track.notes) {
+              track.notes.forEach(note => {
+                if (note.time >= selectionEndTime) {
+                  newTrack.addNote({
+                    midi: note.midi,
+                    time: note.time,
+                    duration: note.duration,
+                    velocity: note.velocity
+                  });
+                }
+              });
+            }
+          } else if (track) {
+            // Just copy other tracks
+            if (track.notes) {
+              track.notes.forEach(note => {
+                newTrack.addNote({
+                  midi: note.midi,
+                  time: note.time,
+                  duration: note.duration,
+                  velocity: note.velocity
+                });
+              });
+            }
+          }
+        });
+        console.log("Setting midiData from Branch 2.");
+        setMidiData(newMidi);
+      } else if (modelObject?.rule?.use_chord || modelObject?.rule?.send_chord || modelType === 'sft_gen' || modelType === 'sft') {
+        console.log("Executing Branch 3: Append-based merge (SFT/Chord).");
+        const newMidi = new Midi();
+        if (originalMidi && originalMidi.header) {
+          // 'ppq' is a read-only getter, so we modify the backing private field '_ppq' directly
+          newMidi.header._ppq = originalMidi.header.ppq;
+          if (originalMidi.header.tempos[0]) {
+            newMidi.header.setTempo(originalMidi.header.tempos[0].bpm);
+            newMidi.header.name = originalMidi.header.name;
+          }
+        }
+
+        const rawBpm = originalMidi?.header.tempos[0]?.bpm || tempo || 120;
+        const bpm = rawBpm > 0 ? rawBpm : 120;
+        const timeSignature = originalMidi?.header.timeSignatures[0]?.timeSignature || [4, 4];
+        const secondsPerMeasure = (60 / bpm) * timeSignature[0];
+
+        // 1. Calculate actual prompt end time based on the last note's end time (aligned to measure boundary)
+        let promptEndTime = 0;
+        if (originalMidi && originalMidi.tracks) {
+          const allOriginalNotes = originalMidi.tracks.flatMap(t => t.notes || []);
+          if (allOriginalNotes.length > 0) {
+            const lastNoteTime = allOriginalNotes.reduce((max, note) => Math.max(max, note.time + note.duration), 0);
+            const lastMeasure = Math.ceil(lastNoteTime / secondsPerMeasure);
+            promptEndTime = lastMeasure * secondsPerMeasure;
+          } else {
+            promptEndTime = originalMidi.duration;
+          }
+        } else {
+          promptEndTime = originalMidi ? originalMidi.duration : 0;
+        }
+
+        // 2. Smart Shift Decision: Check if the generated MIDI already has a leading silence/offset
+        const genNotes = generatedMidi.tracks.flatMap(t => t.notes || []).sort((a, b) => a.time - b.time);
+        const firstGenNoteTime = genNotes.length > 0 ? genNotes[0].time : 0;
+
+        const ruleShiftMeasure = modelObject?.rule?.shift_measure;
+        const targetShiftMeasures = typeof ruleShiftMeasure === 'number' ? ruleShiftMeasure : (isSft ? 1 : 0);
+
+        // If the generated MIDI already starts after targetShiftMeasures (e.g. API generated it with a 1-measure blank space),
+        // we set shiftTime to targetShiftMeasures to subtract/cut it on the client side.
+        const alreadyHasShift = firstGenNoteTime >= (targetShiftMeasures * secondsPerMeasure - 0.1);
+        const shiftTime = alreadyHasShift ? (targetShiftMeasures * secondsPerMeasure) : 0;
+
+        console.log("=== Branch 3 Smart Merge Parameters (Silence Cut Active) ===", {
+          promptEndTime,
+          lastNoteTimeAligned: (promptEndTime / secondsPerMeasure) + " measures",
+          firstGenNoteTime: firstGenNoteTime.toFixed(3) + "s",
+          alreadyHasShift,
+          cutShiftTime: shiftTime.toFixed(3) + "s",
+          targetPosition: promptEndTime + (alreadyHasShift ? 0 : (targetShiftMeasures * secondsPerMeasure))
+        });
+
+        const targetTrackIndex = pianoRollRef.current?.getSelectedTrackIndex() || 0;
+
+        if (originalMidi && originalMidi.tracks) {
+          originalMidi.tracks.forEach((originalTrack, index) => {
+            const newTrack = newMidi.addTrack();
+            newTrack.instrument.number = originalTrack.instrument.number;
+            newTrack.name = originalTrack.name;
+
+            // 1. Copy notes before promptEndTime
+            if (originalTrack.notes) {
+              originalTrack.notes.forEach(note => {
+                if (note.time < promptEndTime) {
+                  newTrack.addNote({
+                    midi: note.midi,
+                    time: note.time,
+                    duration: note.duration,
+                    velocity: note.velocity
+                  });
+                }
+              });
+            }
+
+            // 2. Append generated notes to target track, subtracting shiftTime to cut the leading silence
+            if (index === targetTrackIndex && generatedMidi && generatedMidi.tracks) {
+              generatedMidi.tracks.forEach(generatedTrack => {
+                if (generatedTrack.notes) {
+                  generatedTrack.notes.forEach(note => {
+                    const finalTime = note.time + promptEndTime - shiftTime;
+                    newTrack.addNote({
+                      midi: note.midi,
+                      time: Math.max(promptEndTime, finalTime),
+                      duration: note.duration,
+                      velocity: note.velocity
+                    });
+                  });
+                }
+              });
+            }
+          });
+        } else {
+          // Fallback: If no originalMidi tracks, just copy generatedMidi tracks
+          if (generatedMidi && generatedMidi.tracks) {
+            generatedMidi.tracks.forEach(generatedTrack => {
+              const newTrack = newMidi.addTrack();
+              newTrack.instrument.number = generatedTrack.instrument.number;
+              newTrack.name = generatedTrack.name;
+              if (generatedTrack.notes) {
+                generatedTrack.notes.forEach(note => {
+                  newTrack.addNote({
+                    midi: note.midi,
+                    time: note.time,
+                    duration: note.duration,
+                    velocity: note.velocity
+                  });
+                });
+              }
+            });
+          }
+        }
+        setMidiData(newMidi);
       } else {
-        newMidi.header.setTempo(bpm);
+        console.log("Merge effect: No matching merge branch. Fallback: No action taken.");
       }
-
-      const tracksToProcess = originalMidi ? originalMidi.tracks : [null];
-
-      tracksToProcess.forEach((track, index) => {
-        const newTrack = newMidi.addTrack();
-        if (track) {
-          newTrack.instrument.number = track.instrument.number;
-          newTrack.name = track.name;
-          newTrack.channel = track.channel;
-        }
-
-        if (index === targetTrackIndex) {
-          // 1. Add notes BEFORE selection from original
-          if (track && track.notes) {
-            track.notes.forEach(note => {
-              if (note.time < selectionStartTime) {
-                newTrack.addNote({
-                  midi: note.midi,
-                  time: note.time,
-                  duration: note.duration,
-                  velocity: note.velocity
-                });
-              }
-            });
-          }
-
-          // 2. Add GENERATED notes
-          generatedMidi.tracks.forEach(genTrack => {
-            genTrack.notes.forEach(note => {
-              newTrack.addNote({
-                midi: note.midi,
-                time: note.time + offsetToApply,
-                duration: note.duration,
-                velocity: note.velocity
-              });
-            });
-          });
-
-          // 3. Add notes AFTER selection from original
-          if (track && track.notes) {
-            track.notes.forEach(note => {
-              if (note.time >= selectionEndTime) {
-                newTrack.addNote({
-                  midi: note.midi,
-                  time: note.time,
-                  duration: note.duration,
-                  velocity: note.velocity
-                });
-              }
-            });
-          }
-        } else if (track) {
-          // Just copy other tracks
-          if (track.notes) {
-            track.notes.forEach(note => {
-              newTrack.addNote({
-                midi: note.midi,
-                time: note.time,
-                duration: note.duration,
-                velocity: note.velocity
-              });
-            });
-          }
-        }
-      });
-      setMidiData(newMidi);
-    } else if (modelObject?.rule?.use_chord || modelObject?.rule?.send_chord || modelType === 'sft') {
-      const newMidi = new Midi();
-      if (originalMidi && originalMidi.header && originalMidi.header.tempos[0]) {
-        newMidi.header.setTempo(originalMidi.header.tempos[0].bpm);
-        newMidi.header.name = originalMidi.header.name;
-      }
-
-      const promptNotes = pianoRollRef.current.getSelectedNotes();
-      const promptEndTime = promptNotes.reduce((max, note) => Math.max(max, note.time + note.duration), 0);
-
-      const track = newMidi.addTrack();
-
-      originalMidi.tracks.forEach((originalTrack, index) => {
-        if (trackMutes[index]) return;
-
-        originalTrack.notes.forEach(note => {
-          if (note.time < promptEndTime) {
-            track.addNote({
-              midi: note.midi,
-              time: note.time,
-              duration: note.duration,
-              velocity: note.velocity
-            });
-          }
-        });
-      });
-
-      generatedMidi.tracks.forEach(generatedTrack => {
-        generatedTrack.notes.forEach(note => {
-          track.addNote({
-            midi: note.midi,
-            time: note.time + promptEndTime,
-            duration: note.duration,
-            velocity: note.velocity
-          });
-        });
-      });
-      setMidiData(newMidi);
+    } catch (error) {
+      console.error("Error during MIDI merge rendering:", error);
+      setNotification({ open: true, message: `Render/Merge failed: ${error.message}`, severity: 'error' });
+      setIsGenerating(false);
     }
   }, [generatedMidis, selectedGeneratedMidi, originalMidi, modelInfo, selectedModel, trackMutes, generationRange]);
 
@@ -1010,9 +1505,9 @@ function App() {
 
   const deleteTrack = (trackIndex) => {
     if (!midiData) return;
-    const newMidiData = { ...midiData };
+    const newMidiData = new Midi(midiData.toArray());
     newMidiData.tracks.splice(trackIndex, 1);
-    setMidiData({ ...newMidiData });
+    setMidiData(newMidiData);
     // Also update mutes to shift or remove
     setTrackMutes(prev => {
       const newMutes = {};
@@ -1029,12 +1524,26 @@ function App() {
     setMidiData(null);
     setOriginalMidi(null);
     setGeneratedMidis([]);
-    setInstruments([]);
+    setGenerationRange(null);
     setInstruments([]);
     setTrackMutes({});
     setTrackSolos({});
     setChords({});
     handleStop();
+    setSftLocked(false);
+    setCustomKey(null);
+    setCustomDensities(null);
+  };
+
+  const handleGenerateMetadataOnly = async (overrides) => {
+    setShowSftMetadataModal(false);
+    await handleGenerate(overrides);
+  };
+
+  const handleSaveIncrementalConfig = (config) => {
+    setCustomKey(config.customKey);
+    setCustomDensities(config.customDensities);
+    setCustomTask(config.customTask);
   };
 
   const duration = midiData ? midiData.duration : 0;
@@ -1057,7 +1566,7 @@ function App() {
 
       {/* Toast Notification */}
       {notification.open && (
-        <div className={`fixed top-4 right-4 z-[100] p-4 rounded-lg shadow-lg border flex items-start gap-3 max-w-md animate-in slide-in-from-right-5 fade-in duration-300 ${notification.severity === 'error' ? 'bg-red-900/90 border-red-700 text-red-100' :
+        <div className={`fixed top-4 right-4 z-[300] p-4 rounded-lg shadow-lg border flex items-start gap-3 max-w-md animate-in slide-in-from-right-5 fade-in duration-300 ${notification.severity === 'error' ? 'bg-red-900/90 border-red-700 text-red-100' :
           notification.severity === 'warning' ? 'bg-yellow-900/90 border-yellow-700 text-yellow-100' :
             notification.severity === 'success' ? 'bg-green-900/90 border-green-700 text-green-100' :
               'bg-blue-900/90 border-blue-700 text-blue-100'
@@ -1095,23 +1604,30 @@ function App() {
                     {/* Added h-full to container for independent scrolling if needed, checking layout */}
                     <div className="card space-y-6">
 
-                      <Settings
-                        instrument={instrument}
-                        setInstrument={setInstrument}
-                        tempo={tempo}
-                        setTempo={setTempo}
-                        selectedModel={selectedModel}
-                        setSelectedModel={setSelectedModel}
-                        modelInfo={modelInfo}
-                        debugMode={debugMode}
-                        keySelection={key}
-                        setKey={setKey}
-                        selectedInstruments={selectedInstruments}
-                        setSelectedInstruments={setSelectedInstruments}
-                        densities={densities}
-                        setDensities={setDensities}
-                        selectedTask={selectedTask}
-                      />
+                      {!sftLocked && (
+                        <Settings
+                          instrument={instrument}
+                          setInstrument={setInstrument}
+                          tempo={tempo}
+                          setTempo={setTempo}
+                          selectedModel={selectedModel}
+                          setSelectedModel={setSelectedModel}
+                          modelInfo={modelInfo}
+                          debugMode={debugMode}
+                          keySelection={key}
+                          setKey={setKey}
+                          selectedInstruments={selectedInstruments}
+                          setSelectedInstruments={setSelectedInstruments}
+                          densities={densities}
+                          setDensities={setDensities}
+                          selectedTask={selectedTask}
+                          selectedGenres={selectedGenres}
+                          setSelectedGenres={setSelectedGenres}
+                          sftLocked={sftLocked}
+                          thinking={thinking}
+                          setThinking={setThinking}
+                        />
+                      )}
                       <AdvancedSettings
                         temperature={temperature}
                         setTemperature={setTemperature}
@@ -1120,6 +1636,11 @@ function App() {
                         numGems={numGems}
                         setNumGems={setNumGems}
                         rules={modelInfo.find(m => m.model_name === selectedModel)?.rule}
+                        thinking={thinking}
+                        setThinking={setThinking}
+                        isSft={isSft}
+                        cotTemperature={cotTemperature}
+                        setCotTemperature={setCotTemperature}
                       />
                     </div>
 
@@ -1136,8 +1657,84 @@ function App() {
                         generatedMidis={generatedMidis}
                         selectedGeneratedMidi={selectedGeneratedMidi}
                         onSelectedGeneratedMidiChange={setSelectedGeneratedMidi}
+                        isSft={isSft}
+                        onGearClick={() => setShowSftIncrementalConfigModal(true)}
                       />
                     </div>
+
+                    {/* AI Reasoning (CoT) Panel */}
+                    {generationReasons && generationReasons[selectedGeneratedMidi] && (
+                      <div className="card space-y-4 animate-in fade-in slide-in-from-bottom-5 duration-300">
+                        <div className="flex items-center justify-between border-b border-border/50 pb-2">
+                          <h6 className="text-sm font-bold tracking-wide text-text flex items-center gap-2">
+                            <span className="relative flex h-2 w-2">
+                              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-primary opacity-75"></span>
+                              <span className="relative inline-flex rounded-full h-2 w-2 bg-primary"></span>
+                            </span>
+                            AI Reason / CoT
+                          </h6>
+                          <span className={`text-[9px] px-2 py-0.5 rounded-full font-bold ${
+                            generationReasons[selectedGeneratedMidi].source === 'model_cot'
+                              ? 'bg-primary/20 text-primary border border-primary/30'
+                              : 'bg-muted/10 text-muted border border-border'
+                          }`}>
+                            {generationReasons[selectedGeneratedMidi].source === 'model_cot' ? '💡 CoT (Model)' : '⚙️ Request'}
+                          </span>
+                        </div>
+
+                        <div className="grid grid-cols-2 gap-2 text-xs">
+                          {generationReasons[selectedGeneratedMidi].key && (
+                            <div className="p-2 bg-surface/30 border border-border/50 rounded-lg flex flex-col">
+                              <span className="text-[9px] text-muted uppercase font-mono">Key</span>
+                              <span className="font-bold text-text mt-0.5">{generationReasons[selectedGeneratedMidi].key}</span>
+                            </div>
+                          )}
+                          {generationReasons[selectedGeneratedMidi].gen_measure_count && (
+                            <div className="p-2 bg-surface/30 border border-border/50 rounded-lg flex flex-col">
+                              <span className="text-[9px] text-muted uppercase font-mono">Measures</span>
+                              <span className="font-bold text-text mt-0.5">{generationReasons[selectedGeneratedMidi].gen_measure_count} bars</span>
+                            </div>
+                          )}
+                          {generationReasons[selectedGeneratedMidi].genre && generationReasons[selectedGeneratedMidi].genre.length > 0 && (
+                            <div className="p-2 bg-surface/30 border border-border/50 rounded-lg flex flex-col col-span-2">
+                              <span className="text-[9px] text-muted uppercase font-mono">Genre</span>
+                              <div className="flex flex-wrap gap-1 mt-1">
+                                {generationReasons[selectedGeneratedMidi].genre.map(g => (
+                                  <span key={g} className="px-1.5 py-0.5 bg-primary/10 border border-primary/20 text-primary rounded font-mono text-[9px] font-bold">
+                                    {g}
+                                  </span>
+                                ))}
+                              </div>
+                            </div>
+                          )}
+                          {generationReasons[selectedGeneratedMidi].instruments && (
+                            <div className="p-2 bg-surface/30 border border-border/50 rounded-lg flex flex-col col-span-2">
+                              <span className="text-[9px] text-muted uppercase font-mono">Instruments</span>
+                              <span className="font-medium text-text mt-0.5 font-mono">{generationReasons[selectedGeneratedMidi].instruments.join(', ')}</span>
+                            </div>
+                          )}
+                          {generationReasons[selectedGeneratedMidi].note_density && Object.keys(generationReasons[selectedGeneratedMidi].note_density).length > 0 && (
+                            <div className="p-2 bg-surface/30 border border-border/50 rounded-lg flex flex-col col-span-2">
+                              <span className="text-[9px] text-muted uppercase font-mono">Note Density</span>
+                              <div className="space-y-1 mt-1 font-mono text-[9px]">
+                                {Object.entries(generationReasons[selectedGeneratedMidi].note_density).map(([inst, val]) => (
+                                  <div key={inst} className="flex justify-between">
+                                    <span className="text-muted">{inst}:</span>
+                                    <span className="font-bold text-primary">{val}</span>
+                                  </div>
+                                ))}
+                              </div>
+                            </div>
+                          )}
+                          {generationReasons[selectedGeneratedMidi].task && (
+                            <div className="p-2 bg-surface/30 border border-border/50 rounded-lg flex flex-col col-span-2">
+                              <span className="text-[9px] text-muted uppercase font-mono">Internal Task</span>
+                              <span className="font-medium text-text mt-0.5 font-mono">{generationReasons[selectedGeneratedMidi].task}</span>
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    )}
 
                     {debugMode && debugInfo && (
                       <div className="p-4 border border-dashed border-border bg-surface/30 rounded-lg">
@@ -1179,7 +1776,13 @@ function App() {
                             const selectionEnabled = currentModel?.rule?.gen_measure_count === true;
 
                             if (inputMidiAllowed) {
-                              return <MidiInput onMidiUpload={handleMidiUpload} />;
+                              return (
+                                <MidiInput
+                                  onMidiUpload={handleMidiUpload}
+                                  isSft={isSft}
+                                  onGenerateClick={() => setShowSftMetadataModal(true)}
+                                />
+                              );
                             } else {
                               // Create a default empty MIDI object for display
                               const emptyMidi = new Midi();
@@ -1198,8 +1801,14 @@ function App() {
 
                               // Let's create a memoized empty midi to avoid recreation
                               const dummyMidi = new Midi();
-                              dummyMidi.header.tempos.push({ bpm: tempo || 120, ticks: 0 });
-                              dummyMidi.header.timeSignatures.push({ timeSignature: [4, 4], ticks: 0 });
+                              dummyMidi.header.fromJSON({
+                                name: "",
+                                ppq: 480,
+                                meta: [],
+                                tempos: [{ bpm: tempo || 120, ticks: 0 }],
+                                timeSignatures: [{ timeSignature: [4, 4], ticks: 0 }],
+                                keySignatures: []
+                              });
                               const track = dummyMidi.addTrack();
                               // Add C4 quarter note to make it not completely empty if needed, or just leave empty.
 
@@ -1252,7 +1861,9 @@ function App() {
                   settings={{
                     temperature, setTemperature,
                     p, setP,
-                    numGems, setNumGems
+                    numGems, setNumGems,
+                    cotTemperature, setCotTemperature,
+                    thinking, setThinking
                   }}
                   onGenerate={generateMidi}
                   playbackState={playbackState}
@@ -1274,7 +1885,10 @@ function App() {
                     tempo, setTempo,
                     key, setKey,
                     selectedInstruments, setSelectedInstruments,
-                    densities, setDensities
+                    densities, setDensities,
+                    selectedGenres, setSelectedGenres,
+                    cotTemperature, setCotTemperature,
+                    thinking, setThinking
                   }}
                   playbackState={playbackState}
                   onPlay={handlePlay}
@@ -1290,7 +1904,453 @@ function App() {
           )}
         </div>
       </main >
+
+      {/* SFT Modal Popups */}
+      {(() => {
+        const sftModel = modelInfo.find(m => m.tag?.model === 'sft_gen' || m.tag?.model === 'sft');
+        const availableSftInstruments = sftModel?.tag?.instruments
+          ? (Array.isArray(sftModel.tag.instruments) ? sftModel.tag.instruments : [sftModel.tag.instruments])
+          : [];
+        
+        return (
+          <>
+            <SftMetadataModal
+              isOpen={showSftMetadataModal}
+              onClose={() => setShowSftMetadataModal(false)}
+              onGenerate={handleGenerateMetadataOnly}
+              availableInstruments={availableSftInstruments}
+              currentKey={key}
+              currentInstruments={selectedInstruments}
+              currentDensities={densities}
+              currentGenres={selectedGenres}
+              sftTask={sftTask}
+              setSftTask={setSftTask}
+            />
+            <SftIncrementalConfigModal
+              isOpen={showSftIncrementalConfigModal}
+              onClose={() => setShowSftIncrementalConfigModal(false)}
+              onSave={handleSaveIncrementalConfig}
+              availableInstruments={availableSftInstruments}
+              currentCustomKey={customKey}
+              currentCustomDensities={customDensities}
+              currentCustomTask={customTask}
+            />
+          </>
+        );
+      })()}
     </div >
+  );
+}
+
+function SftMetadataModal({ isOpen, onClose, onGenerate, availableInstruments, currentKey, currentInstruments, currentDensities, currentGenres, sftTask, setSftTask }) {
+  const [keySelection, setKeySelection] = useState(currentKey || 'Auto');
+  const [selectedInsts, setSelectedInsts] = useState(currentInstruments || []);
+  const [localDensities, setLocalDensities] = useState(currentDensities || {});
+  const [localGenres, setLocalGenres] = useState(currentGenres || []);
+  const [keySelectorOpen, setKeySelectorOpen] = useState(false);
+
+  useEffect(() => {
+    if (isOpen) {
+      setKeySelection(currentKey || 'Auto');
+      setSelectedInsts(currentInstruments || []);
+      setLocalDensities(currentDensities || {});
+      setLocalGenres(currentGenres || []);
+    }
+  }, [isOpen, currentKey, currentInstruments, currentDensities, currentGenres]);
+
+  useEffect(() => {
+    const updated = { ...localDensities };
+    let changed = false;
+    selectedInsts.forEach(inst => {
+      if (updated[inst] === undefined) {
+        updated[inst] = 4;
+        changed = true;
+      }
+    });
+    if (changed) {
+      setLocalDensities(updated);
+    }
+  }, [selectedInsts]);
+
+  if (!isOpen) return null;
+
+  const toggleGenre = (genre) => {
+    if (localGenres.includes(genre)) {
+      setLocalGenres(localGenres.filter(g => g !== genre));
+    } else {
+      if (localGenres.length < 2) {
+        setLocalGenres([...localGenres, genre]);
+      } else {
+        setLocalGenres([localGenres[1], genre]);
+      }
+    }
+  };
+
+  const toggleInstrument = (inst) => {
+    if (selectedInsts.includes(inst)) {
+      setSelectedInsts(selectedInsts.filter(i => i !== inst));
+    } else {
+      setSelectedInsts([...selectedInsts, inst]);
+    }
+  };
+
+  const handleDensityChange = (inst, value) => {
+    setLocalDensities(prev => ({
+      ...prev,
+      [inst]: parseInt(value)
+    }));
+  };
+
+  const handleGenerateClick = () => {
+    onGenerate({
+      key: keySelection,
+      instruments: selectedInsts,
+      densities: localDensities,
+      genres: localGenres
+    });
+  };
+
+  return (
+    <div className="fixed inset-0 z-[150] flex items-center justify-center p-4">
+      <div className="absolute inset-0 bg-black/70 backdrop-blur-md" onClick={onClose} />
+      <div className="relative w-full max-w-2xl bg-background border border-border rounded-xl shadow-2xl flex flex-col max-h-[85vh] overflow-hidden animate-in zoom-in-95 duration-200">
+        <div className="p-5 border-b border-border flex items-center justify-between bg-surface/30">
+          <h2 className="text-xl font-bold text-white tracking-wide">SFT Generation Settings</h2>
+          <button onClick={onClose} className="p-2 hover:bg-surface rounded-full transition-colors text-muted hover:text-text text-xl">
+            ×
+          </button>
+        </div>
+
+        <div className="p-6 space-y-6 overflow-y-auto">
+          <div className="space-y-2">
+            <label className="text-sm font-semibold text-muted uppercase tracking-wider">SFT Task</label>
+            <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 bg-surface/20 p-3 rounded-lg border border-border/50">
+              {[
+                { id: 'auto', label: '🔍 Auto-detect' },
+                { id: 'meta', label: '✨ Meta (New)' },
+                { id: 'meta_past', label: '➡️ Past (Continue)' },
+                { id: 'meta_future', label: '⬅️ Future (Prepend)' },
+                { id: 'infill', label: '↕️ Infill (Gap)' },
+                { id: 'inst_comp', label: '🎻 Arrangement' },
+              ].map(t => (
+                <button
+                  key={t.id}
+                  onClick={() => setSftTask && setSftTask(t.id)}
+                  className={`px-3 py-2 rounded-lg text-xs font-bold transition-all duration-200 border ${
+                    sftTask === t.id
+                      ? 'bg-primary text-white border-primary shadow-lg shadow-primary/20 scale-[1.02]'
+                      : 'bg-surface border-border text-muted hover:text-text hover:bg-surface/80 hover:border-primary/50'
+                  }`}
+                >
+                  {t.label}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          <div className="space-y-2">
+            <label className="text-sm font-semibold text-muted uppercase tracking-wider">Key</label>
+            <button
+              onClick={() => setKeySelectorOpen(true)}
+              className="w-full p-3 bg-surface border border-border rounded-lg text-left hover:bg-surface/80 transition-colors flex items-center justify-between"
+            >
+              <span className="font-medium text-white">{keySelection}</span>
+              <Music className="w-5 h-5 text-muted" />
+            </button>
+          </div>
+
+          {availableInstruments.length > 0 && (
+            <div className="space-y-2">
+              <label className="text-sm font-semibold text-muted uppercase tracking-wider">Instruments</label>
+              <div className="flex flex-wrap gap-2">
+                {availableInstruments.map(inst => {
+                  const isSelected = selectedInsts.includes(inst);
+                  return (
+                    <button
+                      key={inst}
+                      onClick={() => toggleInstrument(inst)}
+                      className={`px-4 py-2 rounded-md text-sm font-medium transition-all duration-200 ${
+                        isSelected
+                          ? 'bg-primary text-white shadow-lg shadow-primary/25'
+                          : 'bg-surface border border-border text-text hover:bg-surface/80 hover:border-primary/50'
+                      }`}
+                    >
+                      {inst}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+
+          {selectedInsts.length > 0 && (
+            <div className="space-y-4 pt-2 border-t border-border">
+              <label className="text-sm font-semibold text-muted uppercase tracking-wider">Note Density (1-10)</label>
+              <div className="space-y-3">
+                {selectedInsts.map(inst => (
+                  <div key={inst} className="space-y-1 bg-surface/20 p-3 rounded-lg border border-border/50">
+                    <div className="flex justify-between items-center text-sm">
+                      <span className="font-mono text-primary font-bold">{inst}</span>
+                      <span className="font-mono text-muted">{localDensities[inst] || 4}</span>
+                    </div>
+                    <input
+                      type="range"
+                      min="1"
+                      max="10"
+                      step="1"
+                      value={localDensities[inst] || 4}
+                      onChange={(e) => handleDensityChange(inst, e.target.value)}
+                      className="w-full h-1.5 bg-surface rounded-lg appearance-none cursor-pointer accent-primary"
+                    />
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          <div className="space-y-3 pt-2 border-t border-border">
+            <div className="flex justify-between items-center">
+              <label className="text-sm font-semibold text-muted uppercase tracking-wider">Genres (Select up to 2)</label>
+              {localGenres.length > 0 && (
+                <button onClick={() => setLocalGenres([])} className="text-xs text-primary hover:underline font-medium">
+                  Clear All
+                </button>
+              )}
+            </div>
+            <div className="flex flex-wrap gap-2 max-h-40 overflow-y-auto p-3 bg-surface/20 rounded-lg border border-border/50 scrollbar-thin">
+              {ALL_GENRES.map(genre => {
+                const isSelected = localGenres.includes(genre);
+                return (
+                  <button
+                    key={genre}
+                    onClick={() => toggleGenre(genre)}
+                    className={`px-3 py-1.5 rounded-md text-xs font-semibold tracking-wide transition-all duration-200 ${
+                      isSelected
+                        ? 'bg-primary text-white shadow-md shadow-primary/30 scale-95 border border-primary'
+                        : 'bg-surface border border-border text-muted hover:text-text hover:bg-surface/80 hover:border-primary/30'
+                    }`}
+                  >
+                    {genre}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        </div>
+
+        <div className="p-5 border-t border-border bg-surface/30 flex justify-end gap-3">
+          <button onClick={onClose} className="btn-secondary py-2.5 px-5">
+            Cancel
+          </button>
+          <button
+            onClick={handleGenerateClick}
+            disabled={selectedInsts.length === 0}
+            className="btn-primary py-2.5 px-6 font-semibold shadow-lg shadow-primary/20 disabled:opacity-50 disabled:cursor-not-allowed"
+          >
+            Generate
+          </button>
+        </div>
+      </div>
+
+      <KeySelector
+        open={keySelectorOpen}
+        onClose={() => setKeySelectorOpen(false)}
+        onSave={setKeySelection}
+        currentKey={keySelection}
+      />
+    </div>
+  );
+}
+
+function SftIncrementalConfigModal({ isOpen, onClose, onSave, availableInstruments, currentCustomKey, currentCustomDensities, currentCustomTask }) {
+  const [enableKey, setEnableKey] = useState(currentCustomKey !== null);
+  const [localKey, setLocalKey] = useState(currentCustomKey || 'C M');
+  const [enableDensities, setEnableDensities] = useState(currentCustomDensities !== null);
+  const [localDensities, setLocalDensities] = useState(currentCustomDensities || {});
+  const [enableTask, setEnableTask] = useState(currentCustomTask !== null);
+  const [localTask, setLocalTask] = useState(currentCustomTask || 'auto');
+  const [keySelectorOpen, setKeySelectorOpen] = useState(false);
+
+  useEffect(() => {
+    if (isOpen) {
+      setEnableKey(currentCustomKey !== null);
+      setLocalKey(currentCustomKey || 'C M');
+      setEnableDensities(currentCustomDensities !== null);
+      setLocalDensities(currentCustomDensities || {});
+      setEnableTask(currentCustomTask !== null);
+      setLocalTask(currentCustomTask || 'auto');
+    }
+  }, [isOpen, currentCustomKey, currentCustomDensities, currentCustomTask]);
+
+  useEffect(() => {
+    if (enableDensities) {
+      const updated = { ...localDensities };
+      let changed = false;
+      availableInstruments.forEach(inst => {
+        if (updated[inst] === undefined) {
+          updated[inst] = 4;
+          changed = true;
+        }
+      });
+      if (changed) {
+        setLocalDensities(updated);
+      }
+    }
+  }, [enableDensities, availableInstruments]);
+
+  if (!isOpen) return null;
+
+  const handleDensityChange = (inst, value) => {
+    setLocalDensities(prev => ({
+      ...prev,
+      [inst]: parseInt(value)
+    }));
+  };
+
+  const handleSave = () => {
+    onSave({
+      customKey: enableKey ? localKey : null,
+      customDensities: enableDensities ? localDensities : null,
+      customTask: enableTask ? localTask : null
+    });
+    onClose();
+  };
+
+  return (
+    <div className="fixed inset-0 z-[150] flex items-center justify-center p-4">
+      <div className="absolute inset-0 bg-black/70 backdrop-blur-md" onClick={onClose} />
+      <div className="relative w-full max-w-md bg-background border border-border rounded-xl shadow-2xl flex flex-col overflow-hidden animate-in zoom-in-95 duration-200">
+        <div className="p-5 border-b border-border flex items-center justify-between bg-surface/30">
+          <h2 className="text-lg font-bold text-white tracking-wide">Incremental Generation Settings</h2>
+          <button onClick={onClose} className="p-2 hover:bg-surface rounded-full transition-colors text-muted hover:text-text text-xl">
+            ×
+          </button>
+        </div>
+
+        <div className="p-6 space-y-6">
+          <div className="space-y-3">
+            <div className="flex items-center gap-2.5">
+              <input
+                type="checkbox"
+                id="enable-key-override"
+                checked={enableKey}
+                onChange={(e) => setEnableKey(e.target.checked)}
+                className="w-4.5 h-4.5 rounded border-border text-primary focus:ring-primary accent-primary bg-surface"
+              />
+              <label htmlFor="enable-key-override" className="text-sm font-semibold text-text select-none cursor-pointer">
+                Override Key for Generation
+              </label>
+            </div>
+            
+            {enableKey && (
+              <button
+                onClick={() => setKeySelectorOpen(true)}
+                className="w-full p-2.5 bg-surface border border-border rounded-lg text-left hover:bg-surface/80 transition-all flex items-center justify-between animate-in slide-in-from-top-2 duration-200"
+              >
+                <span className="font-medium text-white">{localKey}</span>
+                <Music className="w-4 h-4 text-muted" />
+              </button>
+            )}
+          </div>
+
+          <div className="space-y-3 pt-4 border-t border-border">
+            <div className="flex items-center gap-2.5">
+              <input
+                type="checkbox"
+                id="enable-density-override"
+                checked={enableDensities}
+                onChange={(e) => setEnableDensities(e.target.checked)}
+                className="w-4.5 h-4.5 rounded border-border text-primary focus:ring-primary accent-primary bg-surface"
+              />
+              <label htmlFor="enable-density-override" className="text-sm font-semibold text-text select-none cursor-pointer">
+                Override Note Density for Generation
+              </label>
+            </div>
+
+            {enableDensities && availableInstruments.length > 0 && (
+              <div className="space-y-3 mt-2 animate-in slide-in-from-top-2 duration-200">
+                {availableInstruments.map(inst => (
+                  <div key={inst} className="space-y-1 bg-surface/20 p-2.5 rounded-lg border border-border/50">
+                    <div className="flex justify-between items-center text-xs">
+                      <span className="font-mono text-primary font-bold">{inst}</span>
+                      <span className="font-mono text-muted">{localDensities[inst] || 4}</span>
+                    </div>
+                    <input
+                      type="range"
+                      min="1"
+                      max="10"
+                      step="1"
+                      value={localDensities[inst] || 4}
+                      onChange={(e) => handleDensityChange(inst, e.target.value)}
+                      className="w-full h-1 bg-surface rounded-lg appearance-none cursor-pointer accent-primary"
+                    />
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+
+          <div className="space-y-3 pt-4 border-t border-border">
+            <div className="flex items-center gap-2.5">
+              <input
+                type="checkbox"
+                id="enable-task-override"
+                checked={enableTask}
+                onChange={(e) => setEnableTask(e.target.checked)}
+                className="w-4.5 h-4.5 rounded border-border text-primary focus:ring-primary accent-primary bg-surface"
+              />
+              <label htmlFor="enable-task-override" className="text-sm font-semibold text-text select-none cursor-pointer">
+                Override SFT Task for Generation
+              </label>
+            </div>
+            
+            {enableTask && (
+              <div className="grid grid-cols-2 gap-1.5 p-2 bg-surface/20 border border-border/50 rounded-lg animate-in slide-in-from-top-2 duration-200">
+                {[
+                  { id: 'auto', label: '🔍 Auto-detect' },
+                  { id: 'meta', label: '✨ Meta' },
+                  { id: 'meta_past', label: '➡️ Past' },
+                  { id: 'meta_future', label: '⬅️ Future' },
+                  { id: 'infill', label: '↕️ Infill' },
+                  { id: 'inst_comp', label: '🎻 Arrangement' },
+                ].map(t => (
+                  <button
+                    key={t.id}
+                    onClick={() => setLocalTask(t.id)}
+                    className={`px-2 py-1.5 rounded-md text-[10px] font-bold transition-all duration-200 border ${
+                      localTask === t.id
+                        ? 'bg-primary text-white border-primary shadow shadow-primary/20 scale-[1.02]'
+                        : 'bg-surface border-border text-muted hover:text-text hover:bg-surface/80 hover:border-primary/30'
+                    }`}
+                  >
+                    {t.label}
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
+
+        <div className="p-4 border-t border-border bg-surface/30 flex justify-end gap-3">
+          <button onClick={onClose} className="btn-secondary py-2 px-4 text-sm">
+            Cancel
+          </button>
+          <button
+            onClick={handleSave}
+            className="btn-primary py-2 px-5 text-sm font-semibold shadow-lg shadow-primary/20"
+          >
+            Apply Settings
+          </button>
+        </div>
+      </div>
+
+      <KeySelector
+        open={keySelectorOpen}
+        onClose={() => setKeySelectorOpen(false)}
+        onSave={setLocalKey}
+        currentKey={localKey}
+      />
+    </div>
   );
 }
 
